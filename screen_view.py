@@ -7,7 +7,7 @@ import time
 from native_memory import native_pool
 
 PERMISSION = "Allow Screen Recording for Terminal/Python in System Settings, then reopen Studio Sync."
-_mac_target = {"filter": None, "config": None, "until": 0}
+_mac_target = {"filter": None, "config": None, "until": 0, "max": (1920, 1200)}
 
 
 def _is_fl(name, bundle=""):
@@ -66,33 +66,53 @@ def _mac_filter():
     window = max(windows, key=lambda w: w.frame().size.width * w.frame().size.height)
     filt = SC.SCContentFilter.alloc().initWithDesktopIndependentWindow_(window)
     scale = float(filt.pointPixelScale()) if hasattr(filt, "pointPixelScale") else 2.0
+    width, height = window.frame().size.width * scale, window.frame().size.height * scale
+    # Capture at the size we send, not full Retina size: a 5K window is 60 MB a frame.
+    fit = min(1.0, _mac_target["max"][0] / width, _mac_target["max"][1] / height)
     config = SC.SCStreamConfiguration.alloc().init()
-    config.setWidth_(max(2, int(window.frame().size.width * scale)))
-    config.setHeight_(max(2, int(window.frame().size.height * scale)))
+    config.setWidth_(max(2, int(width * fit)))
+    config.setHeight_(max(2, int(height * fit)))
     config.setShowsCursor_(False)
     _mac_target.update(filter=filt, config=config, until=now + 2)
     return filt, config
 
 
 @native_pool
-def _capture_mac():
+def _capture_mac(max_size):
+    import objc
     import ScreenCaptureKit as SC
 
     if not hasattr(SC, "SCScreenshotManager"):
         raise ValueError("Partner View needs macOS 14 Sonoma or later.")
+    if _mac_target["max"] != tuple(max_size):
+        _mac_target.update(max=tuple(max_size), until=0)
     filt, config = _mac_filter()
+
+    def handled(finish):
+        def handler(image, error):
+            # Runs on a ScreenCaptureKit thread. Turn the frame into JPEG bytes
+            # right here, inside its own autorelease pool, so no native image
+            # memory outlives this call (it used to pile up frame after frame).
+            with objc.autorelease_pool():
+                try:
+                    if error is not None or image is None:
+                        finish(None, error or PERMISSION)
+                    else:
+                        finish(_jpeg(_cgimage_to_pil(image), max_size), None)
+                except Exception as exc:
+                    finish(None, exc)
+
+        return handler
+
     try:
-        cg = _wait(
+        return _wait(
             lambda finish: SC.SCScreenshotManager.captureImageWithFilter_configuration_completionHandler_(
-                filt, config, lambda image, error: finish(image, error)
+                filt, config, handled(finish)
             )
         )
     except ValueError:
         _mac_target["until"] = 0  # Window may have closed or moved; look it up again.
         raise
-    if cg is None:
-        raise ValueError(PERMISSION)
-    return _cgimage_to_pil(cg)
 
 
 def _capture_windows():
@@ -119,15 +139,19 @@ def _capture_windows():
     return ImageGrab.grab(window=windows[0]).convert("RGB")
 
 
-@native_pool
-def capture_fl(max_size=(1280, 900)):
-    if sys.platform == "darwin":
-        im = _capture_mac()
-    elif sys.platform == "win32":
-        im = _capture_windows()
-    else:
-        raise ValueError("Window sharing requires Mac or Windows.")
+def _jpeg(im, max_size):
     im.thumbnail(max_size)
     out = io.BytesIO()
     im.save(out, format="JPEG", quality=85)
+    im.close()
     return out.getvalue()
+
+
+@native_pool
+def capture_fl(max_size=(1280, 900)):
+    """One JPEG of the FL window, at most max_size."""
+    if sys.platform == "darwin":
+        return _capture_mac(max_size)
+    if sys.platform == "win32":
+        return _jpeg(_capture_windows(), max_size)
+    raise ValueError("Window sharing requires Mac or Windows.")

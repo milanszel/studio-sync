@@ -25,7 +25,7 @@ from protocol import FL_PROTOCOL, check_code, new_code
 # PyInstaller's unpack folder when running as an installed app.
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 FROZEN = bool(getattr(sys, "frozen", False))
-VERSION = "0.10.0"
+VERSION = "0.10.1"
 
 
 def write_json_atomic(path, data):
@@ -534,7 +534,24 @@ def make_handler(controller, token):
                         else sharing.get_frame(query.get("source", [""])[0] or None)
                     )
                     if raw:
-                        self.reply(200, raw, "image/jpeg")
+                        # The viewer asks with the tag of the frame it shows; an unchanged
+                        # frame costs nothing and creates no new image in the window.
+                        import hashlib
+
+                        tag = '"%s"' % hashlib.sha1(raw).hexdigest()[:16]
+                        if self.headers.get("If-None-Match") == tag:
+                            self.send_response(304)
+                            self.send_header("ETag", tag)
+                            self.send_header("Content-Length", "0")
+                            self.end_headers()
+                        else:
+                            self.send_response(200)
+                            self.send_header("Content-Type", "image/jpeg")
+                            self.send_header("Cache-Control", "no-store")
+                            self.send_header("ETag", tag)
+                            self.send_header("Content-Length", str(len(raw)))
+                            self.end_headers()
+                            self.wfile.write(raw)
                     else:
                         self.reply(404, "{}")
                 else:

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.1 (app) · 0.6.0 (FL script)
+
+* Partner View memory: the viewer swapped in a new image URL 4 times a second, which the Mac window could keep forever; it now downloads a frame only when it changed and frees the previous one. Mac capture now grabs the window at the size that is sent (not full Retina size) and converts each frame inside its own memory pool, so no native image memory is left behind.
+
+
 ## 0.10.0 (app) · 0.6.0 (FL script)
 
 Update every laptop and reinstall the FL script on each.
