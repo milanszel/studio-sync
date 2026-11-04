@@ -161,6 +161,24 @@ class ControllerTests(unittest.TestCase):
             c.ensure_audio_listening()
             self.assertEqual(start.call_count, 3)
 
+    def test_earlier_later_while_playing_and_buffer_hint(self):
+        c = web_app.Controller()
+        c.bridge = FakeBridge(True, "", "ABC-123")
+        c.bridge.local = dict(playing=True)
+        c.bridge.audio_delay = 0
+        c.action("offset", dict(change_ms=5))
+        c.action("offset", dict(change_ms=5))
+        self.assertAlmostEqual(c.bridge.audio_delay, 0.010)
+        for _ in range(100):
+            c.action("offset", dict(change_ms=-5))
+        self.assertAlmostEqual(c.bridge.audio_delay, -0.25)
+        self.assertEqual(web_app.Controller().settings["audio_delay"], -250)
+        c.current = dict(step_ms=5.8, people=[dict(name="Studio B", step_ms=23.2)])
+        self.assertIn("Studio B about 23 ms", c.buffer_hint())
+        c.current = dict(step_ms=5.8, people=[dict(name="Studio B", step_ms=6.1)])
+        self.assertEqual(c.buffer_hint(), "")
+        c.bridge = None
+
     def test_history_bounded(self):
         c = web_app.Controller()
         for i in range(600):

@@ -47,27 +47,32 @@ class LoopTests(unittest.TestCase):
         self.assertEqual(b.commands, [])
 
     def test_accumulating_drift_corrects_across_repeats(self):
-        b = self.bridge()
-        offset = 0.02
-        corrections = 0
-        for i in range(3213):
-            now = 100 + i * 0.1
-            if i and i % 160 == 0:
-                offset += 0.035
-            b.state = self.state(((now - 0.2) - 100) % 16, now - 0.2)
-            b.local = dict(self.state(((now - 0.1) - 100 - offset) % 16, now - 0.1), applied="1")
-            b.last_fl = now - 0.1
-            b.last_peer = now
-            before = len(b.commands)
-            b.apply_remote(now)
-            if len(b.commands) > before:
-                command = b.commands[-1]
-                self.assertTrue(command["force"])
-                self.assertTrue(0 <= command["pos"] < 16)
-                offset = 0
-                corrections += 1
-        self.assertGreater(corrections, 0)
-        self.assertLess(offset, 0.061)
+        """An 8 bar loop where this laptop keeps slipping 35 ms behind every 16 s.
+        Small slips are nudged back smoothly across the loop point, never jumped."""
+        from test_transport import following_bridge, step
+
+        b = following_bridge()
+        commands = []
+        b.midi = commands.append
+        behind, worst = 0.02, 0
+        nudge_end, nudge_rate = 0, 0
+        for i in range(1600):
+            now = 100 + i * 0.05
+            if i and i % 320 == 0:
+                behind += 0.035
+            if now < nudge_end:
+                behind -= nudge_rate * 0.05  # The nudge plays faster or slower meanwhile.
+            room = (now - 100) % 16
+            before = len(commands)
+            step(b, now, local=(room - behind) % 16, room=room, mode=0, loop_beats=32)
+            for c in commands[before:]:
+                self.assertEqual(c["kind"], "nudge")
+                nudge_rate, nudge_end = c["speed"] - 1, now + c["ms"] / 1000
+            if i > 320:
+                worst = max(worst, abs(behind))
+        self.assertTrue(commands)
+        self.assertLess(abs(behind), 0.012)
+        self.assertLess(worst, 0.06)
 
     def test_fl_reports_wrap_immediately_without_new_edit_serial(self):
         f = FakeFL("loop")

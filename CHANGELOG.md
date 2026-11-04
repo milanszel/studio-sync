@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.0 (app) · 0.6.0 (FL script)
+
+Update every laptop and reinstall the FL script on each.
+
+* Exporting while connected no longer hangs or crashes FL. When FL stops answering (exporting, a dialog, loading) the app stops sending it anything but a slow ping, and the script never touches the transport until FL is responsive again.
+* Much tighter sync. Playheads are compared after smoothing (FL reports positions in audio buffer steps), the tolerance went from 150 ms to 8 ms, and small errors are fixed by playing a fraction of a percent faster or slower for a few seconds instead of jumping. Jumps only happen past 80 ms, on a bar line.
+* Earlier / Later buttons on the main screen move a laptop in 5 ms steps while playing, to line up laptops whose audio comes out at different speeds.
+* The main screen shows In time, Catching up or Leading.
+* Warns when laptops use very different audio buffer sizes.
+* Timing settings can be changed while playing.
+
+
 ## 0.9.0 (app) · 0.5.1 (FL script)
 
 Update every laptop. The FL script is unchanged from 0.8.1.

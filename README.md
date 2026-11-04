@@ -1,8 +1,8 @@
-# Studio Sync 0.9.0
+# Studio Sync 0.10.0
 
 Links up to 8 FL Studio sessions on the same local network so play, pause, position, tempo and loop mode stay together. It also sends files, shows your partner's FL window, and estimates the key of what is playing.
 
-**Upgrading:** update the app on **every** laptop and reinstall the FL script on each (Settings > Install, then click *Update MIDI scripts* in FL). 0.9.0 cannot connect to older versions.
+**Upgrading:** update the app on **every** laptop and reinstall the FL script on each (Settings > Install, then click *Update MIDI scripts* in FL). Every laptop needs the same version.
 
 ## Installing
 
@@ -38,7 +38,8 @@ To run from source instead, use `Start-Mac.command` or `Start-Windows.bat`.
    * Input: enable `Studio Sync To FL`, controller type **Studio Sync Transport**, port 42.
    * Output: enable `Studio Sync From FL`, port 42.
    * Leave external clock and master sync off.
-4. The FL script output should say `Studio Sync 0.5.1 loaded`.
+4. The FL script output should say `Studio Sync 0.6.0 loaded`.
+5. Use the **same audio buffer size** in FL (Options > Audio settings) on every laptop. FL reports its playhead in buffer sized steps, so different sizes leave laptops a constant few ms apart. Studio Sync tells you if they differ.
 
 ## Connecting
 
@@ -53,10 +54,12 @@ If a laptop loses WiFi, everyone keeps playing. It catches up when it returns, a
 ## Timing
 
 * **Start wait** (Host, 100 to 1,000 ms): how far ahead a shared start is scheduled. Raise it if the opening gets cut off on a slow network.
-* **Audio offset** (each laptop, 0 to 250 ms): compensates for a laptop whose audio output is later than the others'.
+* **Earlier / Later** (main screen, each laptop, 5 ms steps): if one laptop always sounds a little behind or ahead, tap these while playing until it lines up. It glides there, no jump.
 * **Start mode** (Host): *Together* holds a pressed Play for a short shared count in so everyone starts at once. *Instant* starts the laptop you pressed Play on right away; the others come in a moment later at the right position.
 
-Change timing only while paused. Starts are timed by the app and sent to FL at the due moment, rather than waiting for FL's idle callback. If the playheads drift apart for 0.75 s, the follower jumps back into place on the next bar line, where it is least audible. Diagnostics shows how many of these jumps happened. A count that keeps rising means the timing needs attention.
+Starts are timed by the app and sent to FL at the due moment. While playing, each laptop compares its own playhead with the room's (smoothed over the last second, since a single FL report can be a whole buffer off). Within 8 ms counts as in time. Further off, FL plays up to 0.8% faster or slower for a few seconds until it has caught up, which you don't hear. Only more than 80 ms off jumps back, on the next bar line. The main screen shows *In time*, *Catching up* or *Leading*; Diagnostics counts the nudges and jumps.
+
+**Exporting:** while FL exports (or shows a dialog) it stops answering, and Studio Sync leaves it completely alone until it's back, then catches up.
 
 Sync is not sample accurate. To measure it: record both laptops' outputs into one interface, one per channel, play a click, and compare the offset at the start and after 5 minutes.
 

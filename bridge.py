@@ -17,7 +17,8 @@ from protocol import (
     valid,
     position,
     loop_duration,
-    phase_distance,
+    signed_phase,
+    PlayheadFilter,
     Authority,
     APP_PROTOCOL,
     FL_PROTOCOL,
@@ -41,6 +42,16 @@ PENDING_TIMEOUT = 2
 # Seconds of clock samples used to estimate the host clock.
 CLOCK_WINDOW = 10
 START_MODES = ("together", "instant")
+# Phase errors (seconds). Below NUDGE_ERROR: in time. Up to SEEK_ERROR: speed FL
+# up or down very slightly until it catches up (inaudible). Above: jump on a bar line.
+NUDGE_ERROR = 0.008
+SEEK_ERROR = 0.08
+# Most FL is sped up or slowed down while nudging (0.8% is about 14 cents if
+# anything were resampled; usually nothing is).
+MAX_NUDGE = 0.008
+# FL normally answers every ping within ~50 ms. Quieter than this means it is
+# busy (exporting, a dialog, loading): stop sending it anything but slow pings.
+FL_QUIET = 0.3
 
 
 def fl_protocol(status):
@@ -197,6 +208,15 @@ class Bridge:
         self.drift_since = None
         self.last_correction = 0
         self.corrections = 0
+        self.nudges = 0
+        self.nudge_ok = True
+        self.nudge_until = 0
+        self.nudge_epoch = 0
+        self.phase_error = None
+        self.step_ms = None
+        self.local_filter = PlayheadFilter()
+        self.remote_filter = PlayheadFilter()
+        self.last_fl_ping = 0
         self.tempo_changed_at = 0
         self.last_state_bpm = None
         self.connected_at = time.monotonic()
@@ -253,6 +273,7 @@ class Bridge:
             version=self.local.get("version") if self.local else None,
             fl_protocol=fl_protocol(self.local),
             fl_api=(self.local or {}).get("api"),
+            step_ms=round(self.step_ms, 1) if self.step_ms is not None else None,
             problem=message if message and now - at < 15 else "",
         )
 
@@ -316,6 +337,7 @@ class Bridge:
             fl_protocol=fp if type(fp) is int else 0,
             version=p.get("version"),
             fl_api=p.get("fl_api") if type(p.get("fl_api")) is int else None,
+            step_ms=p.get("step_ms") if type(p.get("step_ms")) in (int, float) else None,
             problem=str(p.get("problem") or "")[:160],
             share_port=port if type(port) is int and 1 <= port <= 65535 else None,
         )
@@ -508,6 +530,7 @@ class Bridge:
                     fl_ready=m["fl_ready"],
                     fl_protocol=m["fl_protocol"],
                     fl_api=m.get("fl_api"),
+                    step_ms=m.get("step_ms"),
                     problem=m.get("problem", ""),
                     audio_key=m.get("audio_key") if now - m.get("audio_at", 0) < 3 else None,
                 )
@@ -551,6 +574,7 @@ class Bridge:
                         fl_ready=bool(r.get("fl_ready")),
                         fl_protocol=fp if type(fp) is int else 0,
                         fl_api=r.get("fl_api") if type(r.get("fl_api")) is int else None,
+                        step_ms=r.get("step_ms") if type(r.get("step_ms")) in (int, float) else None,
                         problem=str(r.get("problem") or "")[:160],
                         audio_key=clean_audio_key(r.get("audio_key")),
                     )
@@ -589,6 +613,8 @@ class Bridge:
 
     def local_status(self, p, now):
         if p.get("kind") == "error":
+            if str(p.get("message", "")).startswith("nudge"):
+                self.nudge_ok = False  # This FL can't change playback speed: correct by jumping only.
             self.fl_problem = (str(p.get("message", "Unknown"))[:160], now)
             self.last_error = "FL script error: " + str(p.get("message", "Unknown"))
             self.events.put("FL script error: " + str(p.get("message", "Unknown")))
@@ -609,6 +635,15 @@ class Bridge:
             self.pending_since = now
         self.local_serial = p["serial"]
         self.local, self.last_fl = p, now
+        if p["playing"] and not p.get("request"):
+            key = (p["bpm"], p["mode"], p.get("loop_beats", 0), self.nudge_epoch, now < self.nudge_until)
+            self.local_filter.add(key, now, p["pos"], loop_duration(p))
+            step = self.local_filter.step()
+            if step is not None and not loop_duration(p):
+                ms = step * 1000
+                self.step_ms = ms if self.step_ms is None else self.step_ms * 0.95 + ms * 0.05
+        else:
+            self.local_filter.reset()
         self.seq += 1
         sample = self.timeline_sample(p)
         if self.host:
@@ -723,7 +758,8 @@ class Bridge:
             if now - self.pending_since < PENDING_TIMEOUT:
                 return  # Don't overwrite a local edit with a pre-acknowledgment snapshot.
             self.pending_serial = None  # The host never confirmed; follow the room again.
-        if not s or not self.local or now - self.last_fl > 2 or not self.connected(now):
+        if not s or not self.local or now - self.last_fl > FL_QUIET or not self.connected(now):
+            self.phase_error = None
             return
         if self.last_state_bpm is not None and abs(self.last_state_bpm - s["bpm"]) > 0.005:
             self.tempo_changed_at = now
@@ -733,6 +769,7 @@ class Bridge:
         confirmed = self.local.get("applied") == ident
         if s["source"] == self.node and (not scheduled or confirmed):
             self.applied_rev = s["revision"]
+            self.phase_error = None  # Leading: everyone else follows this laptop.
             return
         offset = 0 if self.host else self.offset
         age = now + offset - s["at"]
@@ -754,27 +791,42 @@ class Bridge:
             if scheduled and not confirmed and lead < 0:
                 delay = -lead
             else:
-                predicted = s["pos"] + max(0, lead)
+                predicted = s["pos"] + lead
                 predicted = predicted % cycle if cycle else max(0, predicted)
-        # Use the local sample's age to compare playheads in the same moment.
-        local_pos = position(dict(self.local, at=self.last_fl), now)
         duration = cycle
         local_duration = loop_duration(self.local)
         if not local_duration or abs(local_duration - duration) > 0.001:
             duration = 0
-        settling = now - self.tempo_changed_at < 1 or needs_state
-        drift = (
-            not settling
-            and s["playing"]
-            and phase_distance(predicted, local_pos, duration) > (0.06 if duration else 0.15)
-        )
+        # Compare filtered playheads: one FL report can be off by a whole audio buffer.
+        error = None
+        aim, here = predicted, None
+        if s["playing"] and self.local["playing"] and not (scheduled and age < 0):
+            key = (s["source"], s["revision"], s["bpm"], s["mode"], s.get("loop_beats", 0))
+            self.remote_filter.add(key, s["at"], s["pos"], cycle)
+            room = self.remote_filter.estimate(now + offset, cycle)
+            mine = self.local_filter.estimate(now, local_duration)
+            if room is not None and mine is not None and len(self.local_filter) >= 4:
+                error = signed_phase(room + self.audio_delay - mine, duration)  # Positive: we are behind.
+                aim, here = mine + error, mine
+        else:
+            self.remote_filter.reset()
+        self.phase_error = error
+        local_pos = position(dict(self.local, at=self.last_fl), now)
+        nudging = now < self.nudge_until
+        settling = now - self.tempo_changed_at < 1 or needs_state or nudging or now - self.last_correction < 1
+        big = error is not None and abs(error) > SEEK_ERROR
+        small = error is not None and abs(error) > NUDGE_ERROR
+        drift = not settling and (big or small)
         if drift:
             if self.drift_since is None:
                 self.drift_since = now
         else:
             self.drift_since = None
-        # Avoid chasing one late MIDI/network sample with repeated hard seeks.
-        correct = drift and now - self.drift_since >= 0.75 and now - self.last_correction >= 2
+        # Avoid chasing one late MIDI/network sample: errors must last before acting.
+        sustained = drift and now - self.drift_since
+        seek = big and sustained >= 0.4 and now - self.last_correction >= 2
+        seek = seek or (small and not self.nudge_ok and sustained >= 0.6 and now - self.last_correction >= 2)
+        nudge = small and not big and self.nudge_ok and sustained >= 0.6
         if now - self.last_apply < 0.05:
             return
         if force or not confirmed or needs_state:
@@ -792,15 +844,29 @@ class Bridge:
             )
             if delay > 0:
                 self.schedule_fire(ident, now + delay)
-        elif correct:
+        elif nudge:
+            # Speed FL up (or slow it down) a fraction of a percent until it has caught up.
+            rate = max(-MAX_NUDGE, min(MAX_NUDGE, error / 2.5))
+            if abs(rate) < 0.001:
+                rate = 0.001 if error > 0 else -0.001
+            length = max(0.3, error / rate)
+            self.midi(dict(kind="nudge", id=ident, speed=1 + rate, ms=length * 1000))
+            self.nudge_until = now + length + 0.25
+            self.nudge_epoch += 1
+            self.nudges += 1
+            self.last_apply = now
+            self.drift_since = None
+            return
+        elif seek:
             # Jump back into place on the next bar line, where it is least audible.
             unit = self.bar_seconds(s["bpm"])
             if unit > 3.9:
                 unit = 60.0 / s["bpm"]  # Long bars at slow tempos: use the next beat (FL allows 4 s).
-            wait = unit - (local_pos % unit)
+            at = here if here is not None else local_pos
+            wait = unit - (at % unit)
             if wait < 0.05:
                 wait += unit
-            target = predicted + wait
+            target = aim + wait
             target = target % cycle if cycle else target
             self.midi(
                 dict(
@@ -879,6 +945,7 @@ class Bridge:
                     host=not self.host,
                     outdated=m.get("fl_ready") and m.get("fl_protocol", 0) < FL_PROTOCOL,
                     fl_api=m.get("fl_api"),
+                    step_ms=m.get("step_ms"),
                     problem=m.get("problem", ""),
                     audio_key=m.get("audio_key") if now - m.get("audio_at", 0) < 3 else None,
                 )
@@ -893,6 +960,7 @@ class Bridge:
                         host=False,
                         outdated=r["fl_ready"] and r["fl_protocol"] < FL_PROTOCOL,
                         fl_api=r.get("fl_api"),
+                        step_ms=r.get("step_ms"),
                         problem=r.get("problem", ""),
                         audio_key=r.get("audio_key"),
                     )
@@ -940,7 +1008,11 @@ class Bridge:
                 now = time.monotonic()
                 if now - heartbeat >= 0.05:
                     heartbeat = now
-                    self.midi({"kind": "ping", "coordinated": self.coordinated(now)})
+                    # When FL goes quiet (an export, a dialog) send it only a slow
+                    # ping: a queue of messages can stall or crash it.
+                    if now - self.last_fl < FL_QUIET or now - self.last_fl_ping >= 1:
+                        self.last_fl_ping = now
+                        self.midi({"kind": "ping", "coordinated": self.coordinated(now)})
                     if (
                         not self.host
                         and self.key is not None
@@ -1027,6 +1099,11 @@ class Bridge:
                 outdated=outdated,
                 start_mode=self.start_mode,
                 corrections=self.corrections,
+                nudges=self.nudges,
+                phase_ms=self.phase_error * 1000 if self.phase_error is not None else None,
+                following=bool(self.state and self.state.get("source") != self.node and live),
+                audio_delay_ms=self.audio_delay * 1000,
+                step_ms=self.step_ms,
                 fl_age_ms=(now - self.last_fl) * 1000 if self.last_fl else None,
                 peer_age_ms=(now - self.last_peer) * 1000 if self.last_peer else None,
                 clock_offset_ms=self.offset * 1000 if clock and len(self.clock) else None,

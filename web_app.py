@@ -25,7 +25,7 @@ from protocol import FL_PROTOCOL, check_code, new_code
 # PyInstaller's unpack folder when running as an installed app.
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 FROZEN = bool(getattr(sys, "frozen", False))
-VERSION = "0.9.0"
+VERSION = "0.10.0"
 
 
 def write_json_atomic(path, data):
@@ -118,6 +118,22 @@ class Controller:
         if self.audio_monitor:
             self.audio_monitor.join(timeout=2)
 
+    def buffer_hint(self):
+        """FL reports its playhead in steps of its audio buffer. Laptops with very
+        different buffer sizes end up a constant few ms apart."""
+        mine = self.current.get("step_ms")
+        others = [(p["name"], p["step_ms"]) for p in self.current.get("people") or [] if p.get("step_ms")]
+        if not mine or not others:
+            return ""
+        far = [(n, ms) for n, ms in others if abs(ms - mine) > 8]
+        if not far:
+            return ""
+        listed = ", ".join("%s about %d ms" % (n, ms) for n, ms in far)
+        return (
+            "Audio buffer sizes differ (this laptop about %d ms, %s). Set the same buffer size in FL's "
+            "Audio settings on every laptop, or fine tune with Earlier and Later." % (mine, listed)
+        )
+
     def save_settings(self):
         write_json_atomic(self.settings_path, self.settings)
 
@@ -173,6 +189,8 @@ class Controller:
                 hint = " ".join(
                     x["name"] + ": " + x["problem"] for x in self.current["people"] if x.get("problem")
                 )
+            elif self.buffer_hint():
+                hint = self.buffer_hint()
             elif self.current.get("outdated"):
                 hint = "Update the FL script on: " + ", ".join(self.current["outdated"]) + "."
             elif not self.current.get("peer"):
@@ -306,6 +324,15 @@ class Controller:
                 self.audio_key.stop()
             elif action == "disconnect":
                 self.disconnect()
+            elif action == "offset":
+                # Earlier/Later on the main screen: works while playing; the
+                # sync engine glides to the new spot.
+                delay = float(self.settings.get("audio_delay", 0)) + float(data.get("change_ms", 0))
+                delay = max(-250.0, min(250.0, round(delay)))
+                self.settings["audio_delay"] = delay
+                if self.bridge:
+                    self.bridge.audio_delay = delay / 1000
+                self.save_settings()
             elif action == "new-code":
                 if self.bridge:
                     raise ValueError("Leave the session before changing the room code.")
@@ -314,8 +341,8 @@ class Controller:
             elif action in ("connect", "timing"):
                 wait = float(data.get("start_wait", 400))
                 delay = float(data.get("audio_delay", 0))
-                if not 100 <= wait <= 1000 or not 0 <= delay <= 250:
-                    raise ValueError("Start wait: 100–1,000 ms. Audio offset: 0–250 ms.")
+                if not 100 <= wait <= 1000 or not -250 <= delay <= 250:
+                    raise ValueError("Start wait: 100–1,000 ms. Offset: -250 to 250 ms.")
                 if action == "connect":
                     role = data.get("role", "Host")
                     address = str(data.get("address", "")).strip()
@@ -350,8 +377,6 @@ class Controller:
                         raise
                     self.settings.update(role=role, address=address, code=code, to_fl=to_fl, from_fl=from_fl)
                     self.record("Connected as " + role)
-                elif self.bridge and self.bridge.local and self.bridge.local["playing"]:
-                    raise ValueError("Pause playback before applying timing settings.")
                 mode = data.get("start_mode", self.settings.get("start_mode", "together"))
                 if mode not in ("together", "instant"):
                     raise ValueError("Choose a start mode.")

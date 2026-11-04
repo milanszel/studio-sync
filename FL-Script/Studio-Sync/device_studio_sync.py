@@ -31,10 +31,17 @@ _tempo_edit_at = 0.0
 # effect and to stop FL's own update of it counting as a local edit.
 _tempo_target = None
 _tempo_reported = False
-VERSION = "0.5.1"
-PROTOCOL = 3
+VERSION = "0.6.0"
+PROTOCOL = 4
 # Seconds without an app ping before the script stops following the app.
 PING_TIMEOUT = 5
+# FL calls OnIdle many times a second. A longer gap means FL is busy (exporting,
+# a dialog, loading); the script then leaves FL completely alone. Anything it
+# skips the app sends again once FL is responsive.
+BUSY_GAP = 0.3
+_last_idle = 0.0
+# When the current speed nudge ends (monotonic seconds), or None.
+_nudge = None
 
 
 def tempo_bpm():
@@ -68,6 +75,22 @@ def bar_beats():
         return beats if math.isfinite(beats) and 1 <= beats <= 32 else 4.0
     except Exception:
         return 4.0
+
+
+def busy():
+    return time.monotonic() - _last_idle > BUSY_GAP
+
+
+def end_nudge():
+    """Back to normal speed after a nudge (or if anything interrupts one)."""
+    global _nudge
+    if _nudge is None:
+        return
+    _nudge = None
+    try:
+        transport.setPlaybackSpeed(1.0)
+    except Exception:
+        pass
 
 
 def snapshot():
@@ -167,12 +190,17 @@ def observe(force=False):
         # take and jump to the start); just stop following until it returns.
         _waiting = _pending = None
         _enabled = False
+        end_nudge()
         print("Studio Sync: app disconnected; FL keeps playing on its own.")
         return
     try:
         s = snapshot()
+        if not s["playing"]:
+            end_nudge()
         if (
             _coordinated
+            and not busy()
+            and now - _last_idle < 0.25
             and _waiting is None
             and _pending is None
             and _last is not None
@@ -238,11 +266,22 @@ def OnInit():
     _diagnostic_events, _diagnostic_output, _diagnostic_ping = 0, False, False
     _waiting = _pending = None
     _coordinated = False
-    print("Studio Sync " + VERSION + " loaded. Timed starts enabled.")
+    global _last_idle, _nudge
+    _last_idle, _nudge = time.monotonic(), None
+    print("Studio Sync " + VERSION + " loaded. Timed starts and smooth corrections enabled.")
 
 
 def OnIdle():
-    global _diagnostic_output
+    global _diagnostic_output, _last_idle, _pending, _waiting
+    now = time.monotonic()
+    if _last_idle and now - _last_idle > BUSY_GAP:
+        # Back from being busy (an export, a dialog). Anything queued meanwhile is stale.
+        print("Studio Sync: FL was busy for %.1f s; resuming." % (now - _last_idle))
+        _pending = _waiting = None
+        end_nudge()
+    _last_idle = now
+    if _nudge is not None and now >= _nudge:
+        end_nudge()
     if not _diagnostic_output:
         _diagnostic_output = True
         print("Studio Sync: linked MIDI output = " + str(device.isAssigned()))
@@ -313,6 +352,24 @@ def _diagnose(event, callback):
     )
 
 
+def nudge(p):
+    """Play a fraction of a percent faster or slower for a moment, to drift back
+    into time without a jump."""
+    global _nudge
+    try:
+        speed, length = float(p.get("speed", 1)), float(p.get("ms", 0))
+    except (TypeError, ValueError):
+        return
+    if not (0.97 <= speed <= 1.03 and 0 < length <= 30000) or not transport.isPlaying():
+        return
+    try:
+        transport.setPlaybackSpeed(speed)
+    except Exception as exc:
+        output({"kind": "error", "message": "nudge unavailable in this FL: " + str(exc)})
+        return
+    _nudge = time.monotonic() + length / 1000.0
+
+
 def _receive(event):
     global _enabled, _last_ping, _last, _sent, _applied, _applying, _diagnostic_ping, _coordinated, _waiting, _pending
     payload = getattr(event, "sysex", None)
@@ -328,6 +385,14 @@ def _receive(event):
     try:
         p = json.loads(raw[1 + len(PREFIX) : -1].decode("ascii"))
         if not isinstance(p, dict):
+            return
+        if busy():
+            # FL is exporting or otherwise busy: never touch the transport now.
+            if p.get("kind") == "ping":
+                _last_ping = time.monotonic()
+            return
+        if p.get("kind") == "nudge":
+            nudge(p)
             return
         if p.get("kind") == "fire":
             if _pending is not None and str(p.get("id")) == _applied:
@@ -376,6 +441,7 @@ def _receive(event):
             return
         _applying = True
         _waiting = _pending = None
+        end_nudge()
         if transport.getLoopMode() != mode:
             transport.setLoopMode()
         if abs(tempo_bpm() - bpm) > 0.005:

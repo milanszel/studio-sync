@@ -20,6 +20,39 @@ def bare_bridge(host=False, code="TEST-ROOM-CODE"):
     return b
 
 
+def following_bridge():
+    """A guest that follows another laptop, without sockets or threads."""
+    b = bare_bridge()
+    b.node = "follower"
+    b.applied_rev = 1
+    b.last_correction = 0
+    return b
+
+
+def step(b, now, local, room, bpm=120, mode=1, loop_beats=0, bar_beats=4):
+    """One tick: the leader reported `room` and our FL reported `local`, both just now."""
+    b.state = dict(
+        playing=True, bpm=bpm, mode=mode, loop_beats=loop_beats, pos=room, at=now, source="leader", revision=1
+    )
+    b.local_status(
+        dict(
+            kind="status",
+            playing=True,
+            bpm=bpm,
+            mode=mode,
+            loop_beats=loop_beats,
+            bar_beats=bar_beats,
+            pos=local,
+            serial=0,
+            applied="1",
+            protocol=4,
+        ),
+        now,
+    )
+    b.last_peer = now
+    b.apply_remote(now)
+
+
 class FakeFL:
     def __init__(self, name):
         self.name = name
@@ -32,6 +65,14 @@ class FakeFL:
         self.toggles = 0
         self.starts = []
         self.target = []
+        # Real FL behaviour, off by default: the playhead is reported in audio
+        # buffer steps, playback starts a little after Play, and every sound
+        # card clock runs very slightly fast or slow.
+        self.buffer = 0.0
+        self.start_lag = 0.0
+        self.clock = 1.0
+        self.speed = 1.0
+        self.busy = False
 
         def emit(raw):
             if self.callback:
@@ -63,7 +104,8 @@ class FakeFL:
             ),
             "transport": types.SimpleNamespace(
                 isPlaying=lambda: self.playing,
-                getSongPos=lambda mode: self.position() * 1000 if mode == 0 else int(self.position()),
+                getSongPos=lambda mode: self.reported() * 1000 if mode == 0 else int(self.reported()),
+                setPlaybackSpeed=self.set_speed,
                 getLoopMode=lambda: self.mode,
                 setLoopMode=self.mode_toggle,
                 setSongPos=self.seek,
@@ -81,10 +123,20 @@ class FakeFL:
 
     def position(self):
         now = time.monotonic()
-        if self.playing:
-            self.pos += now - self.at
-        self.at = now
+        if self.playing and now > self.at:
+            self.pos += (now - self.at) * self.speed * self.clock
+        self.at = max(self.at, now)
         return self.pos
+
+    def reported(self):
+        pos = self.position()
+        if self.buffer and self.playing:
+            pos = (pos // self.buffer) * self.buffer
+        return pos
+
+    def set_speed(self, speed):
+        self.position()
+        self.speed = speed
 
     def rec_event(self, index, value, flags):
         if index == 93:
@@ -106,7 +158,8 @@ class FakeFL:
         self.playing = not self.playing
         self.toggles += 1
         if self.playing:
-            self.starts.append((time.monotonic(), self.pos))
+            self.at = time.monotonic() + self.start_lag
+            self.starts.append((self.at, self.pos))
 
     def stop(self):
         self.position()
@@ -124,7 +177,8 @@ class FakeFL:
             self.script.OnSysEx(event)
 
     def idle(self):
-        self.script.OnIdle()
+        if not self.busy:  # FL doesn't call OnIdle while exporting.
+            self.script.OnIdle()
 
 
 class Resource:
@@ -233,30 +287,61 @@ class Tests(unittest.TestCase):
         self.assertFalse(f.script._enabled)
 
     def test_drift_is_corrected_on_the_next_bar_line(self):
-        b = bare_bridge()
-        b.local = dict(playing=True, bpm=120, mode=1, pos=5.3, applied="1", bar_beats=4)
-        b.state = dict(b.local, source="leader", revision=1, at=10, pos=5.0)
-        b.last_fl = 10
-        b.last_peer = 10
-        b.applied_rev = 1
+        b = following_bridge()
         commands = []
         b.midi = commands.append
         fired = []
         b.schedule_fire = lambda ident, due: fired.append(due)
-        for now in (10, 10.4, 10.8):
-            b.state = dict(b.state, at=now, pos=5.0 + (now - 10))
-            b.local = dict(b.local, pos=5.3 + (now - 10))
-            b.last_fl = now
-            b.last_peer = now
-            b.apply_remote(now)
+        sent_at = None
+        for i in range(30):
+            now = 10 + i * 0.05
+            before = len(commands)
+            step(b, now, local=5.3 + i * 0.05, room=5.0 + i * 0.05, bpm=120, bar_beats=4)
+            if len(commands) > before and sent_at is None:
+                sent_at = now
         self.assertEqual(len(commands), 1)
         c = commands[0]
         self.assertTrue(c["seek"])
-        # Local playhead 6.1 s at 120 BPM in 4/4: next bar line at 8.0 s, 1.9 s away.
-        self.assertAlmostEqual(c["delay_ms"], 1900, delta=1)
-        self.assertAlmostEqual(c["pos"], 5.8 + 1.9, delta=0.001)
+        # 120 BPM in 4/4: bars are 2 s. Jump on the next bar line of our own playhead.
+        here = 5.3 + (sent_at - 10)
+        wait = 2 - here % 2
+        self.assertAlmostEqual(c["delay_ms"], wait * 1000, delta=2)
+        self.assertAlmostEqual(c["pos"], 5.0 + (sent_at - 10) + wait, delta=0.002)
         self.assertEqual(b.corrections, 1)
         self.assertEqual(len(fired), 1)
+
+    def test_small_drift_is_nudged_not_jumped(self):
+        b = following_bridge()
+        commands = []
+        b.midi = commands.append
+        for i in range(40):
+            now = 10 + i * 0.05
+            step(b, now, local=5.0 + i * 0.05, room=5.03 + i * 0.05, bpm=120)
+        self.assertEqual(len(commands), 1)
+        c = commands[0]
+        self.assertEqual(c["kind"], "nudge")
+        self.assertGreater(c["speed"], 1)  # Behind, so play slightly faster.
+        self.assertLessEqual(c["speed"], 1.008)
+        # Speed times length makes up the 30 ms.
+        self.assertAlmostEqual((c["speed"] - 1) * c["ms"] / 1000, 0.03, delta=0.004)
+        self.assertEqual(b.nudges, 1)
+
+    def test_in_time_does_nothing(self):
+        b = following_bridge()
+        commands = []
+        b.midi = commands.append
+        import random
+
+        rnd = random.Random(3)
+        buffer = 1024 / 44100
+        for i in range(200):
+            now = 10 + i * 0.05 + rnd.uniform(0, 0.02)
+            # Both FLs report in buffer steps; the leader is truly 4 ms ahead.
+            mine = 5.0 + (now - 10)
+            theirs = 5.004 + (now - 10)
+            step(b, now, local=(mine // buffer) * buffer, room=(theirs // buffer) * buffer, bpm=120)
+        self.assertEqual(commands, [])
+        self.assertLess(abs(b.phase_error), 0.02)
 
     def test_late_scheduled_start_catches_up_by_audio_offset(self):
         b = bare_bridge()
@@ -479,29 +564,20 @@ class Tests(unittest.TestCase):
         self.assertAlmostEqual(f.script.snapshot()["pos"], 3.456)
 
     def test_drift_requires_persistence_before_seeking(self):
-        b = bare_bridge()
-        b.host = False
-        b.pending_serial = None
-        b.node = "follower"
-        b.offset = 0
-        b.local = dict(playing=True, bpm=140, mode=1, pos=5, applied="1")
-        b.state = dict(b.local, source="leader", revision=1, at=10, pos=5.3)
-        b.last_fl = 10
-        b.last_peer = 10
-        b.peer_fl_ready = True
-        b.applied_rev = 1
-        b.last_apply = 0
-        b.last_correction = 0
-        b.drift_since = None
+        b = following_bridge()
         commands = []
         b.midi = commands.append
-        b.apply_remote(10)
-        b.apply_remote(10.5)
-        self.assertEqual(commands, [])
-        b.apply_remote(10.8)
-        self.assertEqual(len(commands), 1)
-        b.apply_remote(11)
-        self.assertEqual(len(commands), 1)
+        times = []
+        for i in range(30):
+            now = 10 + i * 0.05
+            before = len(commands)
+            step(b, now, local=5 + i * 0.05, room=5.3 + i * 0.05, bpm=140)
+            if len(commands) > before:
+                times.append(now)
+        # Nothing for the first 0.4 s of a clear error, then one jump, then no chasing.
+        self.assertEqual(len(times), 1)
+        self.assertGreaterEqual(times[0], 10.5)
+        self.assertTrue(commands[0]["seek"])
 
     def test_play_pause_without_event_pmeflags(self):
         f = FakeFL("no_flags")

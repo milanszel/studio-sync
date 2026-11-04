@@ -60,6 +60,69 @@ def phase_distance(a, b, duration=0):
     return distance
 
 
+def signed_phase(diff, duration=0):
+    """A position difference as the shortest signed distance, around the loop if there is one."""
+    if duration:
+        diff = (diff + duration / 2) % duration - duration / 2
+    return diff
+
+
+class PlayheadFilter:
+    """Where a playhead really is, from noisy (time, position) reports.
+
+    FL reports its position in audio buffer sized steps, at uneven moments.
+    One report can be off by 20 ms or more; the median of the last second of
+    reports, each projected to the same moment, is accurate to a few ms.
+    History restarts whenever `key` changes (new revision, tempo, loop, speed)
+    or a report is far off the estimate (a seek)."""
+
+    WINDOW = 1.0
+    SEEK = 0.05
+
+    def __init__(self):
+        self.samples = []
+        self.key = None
+
+    def reset(self):
+        self.samples = []
+        self.key = None
+
+    def add(self, key, t, pos, duration=0):
+        if key != self.key:
+            self.samples, self.key = [], key
+        if self.samples:
+            if any(abs(t - old) < 1e-6 for old, _ in self.samples):
+                return  # The same report again.
+            expected = self.estimate(t, duration)
+            if abs(signed_phase(pos - expected, duration)) > self.SEEK:
+                self.samples = []
+        self.samples.append((t, pos))
+        self.samples = [x for x in self.samples if t - x[0] <= self.WINDOW]
+
+    def estimate(self, now, duration=0):
+        if not self.samples:
+            return None
+        ref_t, ref_p = self.samples[-1]
+        residuals = sorted(signed_phase((p - t) - (ref_p - ref_t), duration) for t, p in self.samples)
+        middle = residuals[len(residuals) // 2]
+        if len(residuals) % 2 == 0:
+            middle = (middle + residuals[len(residuals) // 2 - 1]) / 2
+        pos = ref_p + (now - ref_t) + middle
+        return pos % duration if duration else pos
+
+    def __len__(self):
+        return len(self.samples)
+
+    def step(self):
+        """Size of the steps the position moves in (the audio buffer), or None.
+        Reports are spread evenly over one step, so 80% of them span 0.8 steps."""
+        if len(self.samples) < 15:
+            return None
+        ref_t, ref_p = self.samples[-1]
+        r = sorted((p - t) - (ref_p - ref_t) for t, p in self.samples)
+        return (r[int(len(r) * 0.9)] - r[int(len(r) * 0.1)]) / 0.8
+
+
 class Authority:
     """Host serializes edits; telemetry from the current leader updates position."""
 
@@ -96,7 +159,7 @@ class Authority:
 # Wire protocol between the apps. Bump when packets change incompatibly.
 APP_PROTOCOL = 4
 # FL controller script protocol. 2 adds the timed 'fire' start, 3 adds timed seeks.
-FL_PROTOCOL = 3
+FL_PROTOCOL = 4
 # Laptops in one room, host included.
 MAX_MEMBERS = 8
 # Packets older or newer than this (wall clock seconds) are rejected as replays.

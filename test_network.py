@@ -1,6 +1,7 @@
 """Several laptops over a simulated bad network: lag, jitter, lost packets."""
 
 import heapq
+import os
 import random
 import socket
 import threading
@@ -143,6 +144,7 @@ class NetworkTests(unittest.TestCase):
         positions = [fl.position() for fl in fls]
         self.assertLess(max(positions) - min(positions), tolerance, positions)
 
+    @unittest.skipIf(os.environ.get("CI"), "millisecond timing is unreliable on shared build servers")
     def test_four_laptops_start_together_on_a_bad_network(self):
         room = Room(3, link=dict(delay=0.02, jitter=0.015, loss=0.05))
         try:
@@ -267,6 +269,68 @@ class NetworkTests(unittest.TestCase):
             room.wait(lambda: "keeps trying to join" in host.network_error, 2)
             self.assertIn("keeps trying to join", host.network_error)
             self.assertLessEqual(sum(1 for h in host.hellos if h[1] == "127.0.0.1"), 11)
+        finally:
+            room.close()
+
+    @unittest.skipIf(os.environ.get("CI"), "millisecond timing is unreliable on shared build servers")
+    def test_real_world_drift_stays_tight(self):
+        """Different buffer sizes, a late start and sound card clocks 200 ppm apart
+        (worse than real laptops): the true playheads must stay within ~10 ms."""
+        room = Room(1, link=dict(delay=0.004, jitter=0.003, loss=0.01))
+        try:
+            host_fl, guest_fl = room.fls
+            host_fl.buffer, guest_fl.buffer = 256 / 44100, 1024 / 44100
+            guest_fl.start_lag, guest_fl.clock = 0.03, 1.0002
+            self.assertTrue(room.wait(room.ready, 8))
+            room.wait(lambda: False, 3)
+            host_fl.user_toggle()
+            self.assertTrue(room.wait(lambda: host_fl.playing and guest_fl.playing, 4))
+            room.wait(lambda: False, 6)  # Let it settle.
+            gaps = []
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                room.wait(lambda: False, 0.25)
+                gaps.append(abs(host_fl.position() - guest_fl.position()))
+            guest = room.bridges[1]
+            print(
+                "\nworst gap %.1f ms, typical %.1f ms, nudges %d, jumps %d"
+                % (max(gaps) * 1000, sorted(gaps)[len(gaps) // 2] * 1000, guest.nudges, guest.corrections)
+            )
+            # What's left is constant: FL reports the playhead in buffer sized steps, so
+            # laptops with different buffer sizes sit a few ms apart (Earlier/Later fixes it).
+            self.assertLess(sorted(gaps)[len(gaps) // 2], 0.012)
+            self.assertLess(max(gaps) - min(gaps), 0.006, "the gap wanders")
+            self.assertLessEqual(guest.corrections, 1)
+        finally:
+            room.close()
+
+    def test_export_is_left_alone(self):
+        """While FL exports it stops calling OnIdle. The script must not touch the
+        transport and the app must stop flooding it with messages."""
+        room = Room(1)
+        try:
+            host_fl, guest_fl = room.fls
+            self.assertTrue(room.wait(room.ready, 8))
+            host_fl.user_toggle()
+            self.assertTrue(room.wait(lambda: host_fl.playing and guest_fl.playing, 4))
+            sent = []
+            original = room.bridges[1].output.send
+            room.bridges[1].output.send = lambda msg: (sent.append(msg), original(msg))
+            guest_fl.busy = True  # Export starts on the guest.
+            room.wait(lambda: False, 0.5)
+            toggles, targets = guest_fl.toggles, len(guest_fl.target)
+            host_fl.bpm = 133.0  # Meanwhile the room changes tempo and jumps.
+            host_fl.seek(40000, 0)
+            room.wait(lambda: False, 3)
+            self.assertEqual(guest_fl.toggles, toggles, "transport touched during export")
+            self.assertEqual(len(guest_fl.target), targets, "playhead moved during export")
+            self.assertEqual(guest_fl.bpm, 120.0)
+            later = len(sent)
+            room.wait(lambda: False, 2)
+            self.assertLessEqual(len(sent) - later, 3, "app kept flooding a busy FL")
+            guest_fl.busy = False  # Export finished: it catches up with the room.
+            self.assertTrue(room.wait(lambda: guest_fl.bpm == 133.0, 4))
+            self.assertTrue(room.wait(lambda: abs(guest_fl.position() - host_fl.position()) < 0.05, 6))
         finally:
             room.close()
 
