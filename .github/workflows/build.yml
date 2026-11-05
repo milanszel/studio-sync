@@ -62,6 +62,8 @@ jobs:
 
   release:
     needs: [mac, windows]
+    # Publish whatever got built, so one platform's runner trouble doesn't block the other.
+    if: ${{ always() && (needs.mac.result == 'success' || needs.windows.result == 'success') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
