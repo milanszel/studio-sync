@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.2 (app) · FL script unchanged
+
+* Windows installer: no more "close Studio Sync" prompts. It ends any Studio Sync left running in the background before installing or uninstalling.
+* Closing the window always quits the app, even if cleanup hangs, so no invisible copy stays running.
+
 ## 0.10.1 (app) · 0.6.0 (FL script)
 
 * Partner View memory: the viewer swapped in a new image URL 4 times a second, which the Mac window could keep forever; it now downloads a frame only when it changed and frees the previous one. Mac capture now grabs the window at the size that is sent (not full Retina size) and converts each frame inside its own memory pool, so no native image memory is left behind.

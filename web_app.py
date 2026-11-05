@@ -5,6 +5,7 @@ import hmac
 import re
 import platform
 import json
+import os
 import queue
 import secrets
 import shutil
@@ -25,7 +26,7 @@ from protocol import FL_PROTOCOL, check_code, new_code
 # PyInstaller's unpack folder when running as an installed app.
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 FROZEN = bool(getattr(sys, "frozen", False))
-VERSION = "0.10.1"
+VERSION = "0.10.2"
 
 
 def write_json_atomic(path, data):
@@ -750,6 +751,12 @@ def main():
         controller.window.events.closed += close_partner
         webview.start()
     finally:
+        # Closing the window must end the app. If any cleanup below hangs
+        # (a stuck MIDI port, a network thread), quit anyway after 3 s so no
+        # invisible Studio Sync is left holding its files and ports.
+        watchdog = threading.Timer(3.0, lambda: os._exit(0))
+        watchdog.daemon = True
+        watchdog.start()
         if server:
             if thread:
                 server.shutdown()
@@ -762,6 +769,11 @@ def main():
             for port in ports:
                 port.close()
         instance.close()
+    if FROZEN:
+        # Leftover non daemon threads must not keep the process alive.
+        if sys.stdout:
+            sys.stdout.flush()
+        os._exit(0)
 
 
 if __name__ == "__main__":

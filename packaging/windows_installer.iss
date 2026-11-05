@@ -25,7 +25,9 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ; Needed for Program Files and the firewall rule.
 PrivilegesRequired=admin
-CloseApplications=yes
+; The installer closes Studio Sync itself (see PrepareToInstall), so Windows'
+; "close these applications" prompts never appear.
+CloseApplications=no
 RestartApplications=no
 
 [Tasks]
@@ -57,6 +59,28 @@ Filename: "{app}\Studio Sync.exe"; Description: "Open Studio Sync"; Flags: posti
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Studio Sync"""; Flags: runhidden; RunOnceId: "RemoveFirewallRule"
 
 [Code]
+procedure StopStudioSync;
+var
+  ResultCode: Integer;
+begin
+  // A Studio Sync left running in the background (or its web view helpers)
+  // holds files in the install folder. End it and everything it started.
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM "Studio Sync.exe"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(1000);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopStudioSync;
+  Result := '';
+end;
+
+function InitializeUninstall: Boolean;
+begin
+  StopStudioSync;
+  Result := True;
+end;
+
 function FLUserFolderExists: Boolean;
 begin
   Result := DirExists(ExpandConstant('{userdocs}\Image-Line\FL Studio'));
