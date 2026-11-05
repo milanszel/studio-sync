@@ -239,6 +239,18 @@ class NetworkTests(unittest.TestCase):
         finally:
             room.close()
 
+    def test_fast_and_slow_tempos_sync(self):
+        # FL allows 10 to 522 BPM; a 407 BPM project used to be rejected.
+        room = Room(1)
+        try:
+            self.assertTrue(room.wait(room.ready, 8))
+            for bpm in (407.0, 522.0, 10.0):
+                room.fls[0].bpm = bpm
+                self.assertTrue(room.wait(lambda: room.fls[1].bpm == bpm, 4), bpm)
+                self.assertFalse(room.bridges[0].last_error, room.bridges[0].last_error)
+        finally:
+            room.close()
+
     def test_wrong_code_is_refused_and_guessing_is_limited(self):
         room = Room(0)
         try:

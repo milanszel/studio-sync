@@ -1,5 +1,12 @@
 # Changelog
 
+
+## 0.10.3 (app) · 0.6.1 (FL script)
+
+Update every laptop and reinstall the FL script on each.
+
+* Tempos above 300 BPM (or below 30) were rejected with "FL response rejected". Any tempo FL allows, 10 to 522 BPM, now syncs.
+
 ## 0.10.2 (app) · FL script unchanged
 
 * Windows installer: no more "close Studio Sync" prompts. It ends any Studio Sync left running in the background before installing or uninstalling.

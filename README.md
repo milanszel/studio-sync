@@ -1,4 +1,4 @@
-# Studio Sync 0.10.2
+# Studio Sync 0.10.3
 
 Links up to 8 FL Studio sessions on the same local network so play, pause, position, tempo and loop mode stay together. It also sends files, shows your partner's FL window, and estimates the key of what is playing.
 
@@ -38,7 +38,7 @@ To run from source instead, use `Start-Mac.command` or `Start-Windows.bat`.
    * Input: enable `Studio Sync To FL`, controller type **Studio Sync Transport**, port 42.
    * Output: enable `Studio Sync From FL`, port 42.
    * Leave external clock and master sync off.
-4. The FL script output should say `Studio Sync 0.6.0 loaded`.
+4. The FL script output should say `Studio Sync 0.6.1 loaded`.
 5. Use the **same audio buffer size** in FL (Options > Audio settings) on every laptop. FL reports its playhead in buffer sized steps, so different sizes leave laptops a constant few ms apart. Studio Sync tells you if they differ.
 
 ## Connecting

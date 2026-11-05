@@ -28,7 +28,7 @@ def valid(s):
             type(s["playing"]) is bool
             and s["mode"] in (0, 1)
             and math.isfinite(s["bpm"])
-            and 30 <= s["bpm"] <= 300
+            and 10 <= s["bpm"] <= 522
             and math.isfinite(s["pos"])
             and 0 <= s["pos"] <= 86400
             and type(s.get("loop_beats", 0)) in (int, float)

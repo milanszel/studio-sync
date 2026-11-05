@@ -31,7 +31,7 @@ _tempo_edit_at = 0.0
 # effect and to stop FL's own update of it counting as a local edit.
 _tempo_target = None
 _tempo_reported = False
-VERSION = "0.6.0"
+VERSION = "0.6.1"
 PROTOCOL = 4
 # Seconds without an app ping before the script stops following the app.
 PING_TIMEOUT = 5
@@ -418,7 +418,7 @@ def _receive(event):
             return
         bpm, pos = float(p["bpm"]), float(p["pos"])
         playing, mode = p["playing"], p["mode"]
-        if not 30 <= bpm <= 300 or not math.isfinite(pos) or pos < 0:
+        if not 10 <= bpm <= 522 or not math.isfinite(pos) or pos < 0:
             return
         if type(playing) is not bool or mode not in (0, 1):
             return

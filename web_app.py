@@ -26,7 +26,7 @@ from protocol import FL_PROTOCOL, check_code, new_code
 # PyInstaller's unpack folder when running as an installed app.
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 FROZEN = bool(getattr(sys, "frozen", False))
-VERSION = "0.10.2"
+VERSION = "0.10.3"
 
 
 def write_json_atomic(path, data):
