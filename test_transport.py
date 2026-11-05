@@ -57,8 +57,10 @@ class FakeFL:
     def __init__(self, name):
         self.name = name
         self.playing = False
-        self.pos = 0.0
-        self.bpm = 120.0
+        # Like FL, the playhead is a count of beats; its time in ms depends on
+        # the current tempo.
+        self.beats = 0.0
+        self._bpm = 120.0
         self.mode = 1
         self.at = time.monotonic()
         self.callback = None
@@ -71,7 +73,6 @@ class FakeFL:
         self.buffer = 0.0
         self.start_lag = 0.0
         self.clock = 1.0
-        self.speed = 1.0
         self.busy = False
 
         def emit(raw):
@@ -105,7 +106,6 @@ class FakeFL:
             "transport": types.SimpleNamespace(
                 isPlaying=lambda: self.playing,
                 getSongPos=lambda mode: self.reported() * 1000 if mode == 0 else int(self.reported()),
-                setPlaybackSpeed=self.set_speed,
                 getLoopMode=lambda: self.mode,
                 setLoopMode=self.mode_toggle,
                 setSongPos=self.seek,
@@ -121,22 +121,46 @@ class FakeFL:
             spec.loader.exec_module(self.script)
         self.script.OnInit()
 
-    def position(self):
+    def advance(self):
         now = time.monotonic()
         if self.playing and now > self.at:
-            self.pos += (now - self.at) * self.speed * self.clock
+            self.beats += (now - self.at) * self._bpm / 60.0 * self.clock
         self.at = max(self.at, now)
+
+    @property
+    def bpm(self):
+        return self._bpm
+
+    @bpm.setter
+    def bpm(self, value):
+        self.advance()
+        self._bpm = value
+
+    def song_bpm(self):
+        # The project tempo, ignoring a nudge in progress.
+        nudge = self.script._nudge
+        return nudge["base"] if nudge else self._bpm
+
+    @property
+    def pos(self):
+        self.advance()
+        return self.beats * 60.0 / self.song_bpm()
+
+    @pos.setter
+    def pos(self, seconds):
+        self.advance()
+        self.beats = seconds * self.song_bpm() / 60.0
+
+    def position(self):
         return self.pos
 
     def reported(self):
-        pos = self.position()
+        # What FL reports: ms at the tempo it is playing right now.
+        self.advance()
+        pos = self.beats * 60.0 / self._bpm
         if self.buffer and self.playing:
             pos = (pos // self.buffer) * self.buffer
         return pos
-
-    def set_speed(self, speed):
-        self.position()
-        self.speed = speed
 
     def rec_event(self, index, value, flags):
         if index == 93:
@@ -149,8 +173,9 @@ class FakeFL:
         self.mode = 1 - self.mode
 
     def seek(self, pos, mode):
-        self.position()
-        self.pos = pos / 1000 if mode == 0 else pos
+        self.advance()
+        seconds = pos / 1000 if mode == 0 else pos
+        self.beats = seconds * self._bpm / 60.0
         self.target.append(self.pos)
 
     def toggle(self):
@@ -372,6 +397,73 @@ class Tests(unittest.TestCase):
         b.apply_remote(3)
         self.assertIsNone(b.pending_serial)
         self.assertEqual(commands[-1]["pos"], 8)
+
+    def nudge_fl(self, name):
+        f, out = self.tempo_fl(name)
+        f.bpm = 140.0
+        f.toggle()
+        f.idle()
+        f.script.OnIdle()
+        return f, out
+
+    def send_nudge(self, f, speed, ms):
+        f.receive(mido.Message("sysex", data=encode(dict(kind="nudge", id="n", speed=speed, ms=ms))))
+
+    def test_nudge_shifts_time_without_changing_the_room_tempo(self):
+        # Earlier/Later and drift fixes used to change FL's BPM for everyone.
+        f, out = self.nudge_fl("nudge1")
+        serial = f.script._serial
+        start = f.pos
+        f.script.OnRefresh(0)
+        before = len(out)
+        self.send_nudge(f, 1.008, 200)
+        self.assertAlmostEqual(f.bpm, 141.12, places=3)  # FL plays 0.8% faster...
+        for _ in range(30):
+            time.sleep(0.01)
+            f.script.OnIdle()
+            f.script.OnRefresh(0)
+            self.assertEqual(f.script.tempo_bpm(), 140.0)  # ...but the project tempo is unchanged.
+        time.sleep(0.05)
+        f.script.OnIdle()
+        self.assertEqual(f.bpm, 140.0)
+        f.script.OnIdle()
+        self.assertEqual(f.script._serial, serial, "a nudge must not count as a tempo edit")
+        self.assertTrue(all(o.get("bpm", 140.0) == 140.0 for o in out[before:] if o.get("kind") == "status"))
+        elapsed = f.pos - start
+        self.assertGreater(elapsed, 0.3)  # Played on, and a little further than real time.
+
+    def test_nudge_position_is_in_project_time(self):
+        f, out = self.nudge_fl("nudge2")
+        f.pos = 60.0
+        self.send_nudge(f, 1.008, 5000)
+        # FL's own ms readout jumps by 0.8% at a new tempo; the script must not.
+        self.assertAlmostEqual(f.script.song_pos(), 60.0, delta=0.02)
+        f.script.set_song_pos(30.0)
+        self.assertAlmostEqual(f.pos, 30.0, delta=0.02)
+
+    def test_tempo_change_during_nudge_wins(self):
+        f, out = self.nudge_fl("nudge3")
+        self.send_nudge(f, 0.992, 5000)
+        f.bpm = 150.0  # The user turns the tempo knob mid nudge.
+        f.script.OnIdle()
+        self.assertEqual(f.script.tempo_bpm(), 150.0)
+        self.assertIsNone(f.script._nudge)
+
+    def test_nudge_return_applied_late_is_not_an_edit(self):
+        f, out = self.nudge_fl("nudge4")
+        later = []
+        self.send_nudge(f, 1.008, 50)
+        f.script.mixer.setCurrentTempo = lambda bpm, flag=0: later.append(bpm)
+        f.script.general.processRECEvent = lambda *a: None
+        serial = f.script._serial
+        time.sleep(0.08)
+        f.script.OnIdle()  # Asks FL to go back to 140; FL does it a cycle later.
+        f.script.OnRefresh(0)
+        self.assertEqual(f.script.tempo_bpm(), 140.0)
+        f.bpm = later[-1]
+        f.script.OnRefresh(0)
+        self.assertEqual(f.script._serial, serial)
+        self.assertEqual(f.script.tempo_bpm(), 140.0)
 
     def tempo_fl(self, name):
         f = FakeFL(name)

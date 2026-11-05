@@ -31,7 +31,7 @@ _tempo_edit_at = 0.0
 # effect and to stop FL's own update of it counting as a local edit.
 _tempo_target = None
 _tempo_reported = False
-VERSION = "0.6.1"
+VERSION = "0.6.2"
 PROTOCOL = 4
 # Seconds without an app ping before the script stops following the app.
 PING_TIMEOUT = 5
@@ -44,9 +44,62 @@ _last_idle = 0.0
 _nudge = None
 
 
-def tempo_bpm():
+def fl_tempo():
     # Explicit BPM mode: confirmed 140000 by default, 140.0 with flag 1.
     return float(mixer.getCurrentTempo(1))
+
+
+def tempo_bpm():
+    """The project tempo. During a nudge FL runs a fraction of a percent off
+    it; that is not a tempo change, so report the tempo underneath."""
+    global _nudge
+    current = fl_tempo()
+    if _nudge is None:
+        return current
+    base, ended = _nudge["base"], _nudge["ended"]
+    at_base, at_nudge = abs(current - base) <= 0.005, abs(current - _nudge["tempo"]) <= 0.005
+    if not (at_base or at_nudge):
+        _nudge = None  # Someone changed the tempo during the nudge; theirs wins.
+        return current
+    if ended is not None:
+        # FL can apply a tempo on its next cycle; wait for the return to settle.
+        waited = time.monotonic() - ended
+        if (at_base and waited > 0.5) or waited > 1.5:
+            _nudge = None
+            return current
+    return base
+
+
+def nudge_factor():
+    # Song position in ms is ticks at the current tempo; convert to and from
+    # the project tempo while a nudge is running.
+    if _nudge is None:
+        return 1.0
+    return fl_tempo() / _nudge["base"]
+
+
+def song_pos():
+    return float(transport.getSongPos(midi.SONGLENGTH_MS)) / 1000.0 * nudge_factor()
+
+
+def set_song_pos(seconds):
+    transport.setSongPos(seconds * 1000.0 / nudge_factor(), midi.SONGLENGTH_MS)
+
+
+def write_tempo(bpm):
+    try:
+        mixer.setCurrentTempo(bpm, 1)
+    except Exception:
+        pass
+    if abs(fl_tempo() - bpm) <= 0.005:
+        return True
+    try:
+        general.processRECEvent(
+            midi.REC_Tempo, int(round(bpm * 1000)), midi.REC_Control | midi.REC_UpdateControl
+        )
+    except Exception:
+        pass
+    return abs(fl_tempo() - bpm) <= 0.005
 
 
 def pattern_beats():
@@ -82,22 +135,22 @@ def busy():
 
 
 def end_nudge():
-    """Back to normal speed after a nudge (or if anything interrupts one)."""
-    global _nudge
-    if _nudge is None:
+    """Back to the project tempo after a nudge (or if anything interrupts one).
+    Nudges change the tempo by a fraction of a percent instead of using
+    transport.setPlaybackSpeed, which some FL versions scale wrongly (a 0.8%
+    nudge became 4x speed and a 407 BPM project)."""
+    if _nudge is None or _nudge["ended"] is not None:
         return
-    _nudge = None
-    try:
-        transport.setPlaybackSpeed(1.0)
-    except Exception:
-        pass
+    _nudge["ended"] = time.monotonic()
+    if abs(fl_tempo() - _nudge["base"]) > 0.005:
+        write_tempo(_nudge["base"])
 
 
 def snapshot():
     return {
         "playing": bool(transport.isPlaying()),
         "bpm": tempo_bpm(),
-        "pos": float(transport.getSongPos(midi.SONGLENGTH_MS)) / 1000.0,
+        "pos": song_pos(),
         "mode": int(transport.getLoopMode()),
         "loop_beats": pattern_beats(),
         "bar_beats": bar_beats(),
@@ -147,20 +200,11 @@ def set_tempo(bpm):
     global _tempo_target, _tempo_reported
     # The app repeats an unconfirmed command; keep the first request time so
     # a refusal is still reported.
+    global _nudge
     if _tempo_target is None or abs(_tempo_target[0] - bpm) > 0.005:
         _tempo_target, _tempo_reported = (bpm, time.monotonic()), False
-    try:
-        mixer.setCurrentTempo(bpm, 1)
-    except Exception:
-        pass
-    if abs(tempo_bpm() - bpm) <= 0.005:
-        return
-    try:
-        general.processRECEvent(
-            midi.REC_Tempo, int(round(bpm * 1000)), midi.REC_Control | midi.REC_UpdateControl
-        )
-    except Exception:
-        pass
+    _nudge = None  # A new room tempo replaces any nudge.
+    write_tempo(bpm)
 
 
 def check_tempo():
@@ -211,7 +255,7 @@ def observe(force=False):
             _applying = True
             try:
                 transport.globalTransport(midi.FPT_Play, 1, midi.PME_System)
-                transport.setSongPos(_last["pos"] * 1000.0, midi.SONGLENGTH_MS)
+                set_song_pos(_last["pos"])
             finally:
                 _applying = False
             _waiting = dict(s, pos=_last["pos"], requested_at=now)
@@ -280,7 +324,7 @@ def OnIdle():
         _pending = _waiting = None
         end_nudge()
     _last_idle = now
-    if _nudge is not None and now >= _nudge:
+    if _nudge is not None and _nudge["ended"] is None and now >= _nudge["until"]:
         end_nudge()
     if not _diagnostic_output:
         _diagnostic_output = True
@@ -304,10 +348,10 @@ def start_pending():
         if command.get("seek"):
             # Bar aligned correction: move the playhead without stopping.
             if transport.isPlaying():
-                transport.setSongPos(command["pos"] * 1000.0, midi.SONGLENGTH_MS)
+                set_song_pos(command["pos"])
             _last = snapshot()
             return
-        transport.setSongPos(command["pos"] * 1000.0, midi.SONGLENGTH_MS)
+        set_song_pos(command["pos"])
         if not transport.isPlaying():
             transport.globalTransport(midi.FPT_Play, 1, midi.PME_System)
         _last = snapshot()
@@ -362,12 +406,15 @@ def nudge(p):
         return
     if not (0.97 <= speed <= 1.03 and 0 < length <= 30000) or not transport.isPlaying():
         return
-    try:
-        transport.setPlaybackSpeed(speed)
-    except Exception as exc:
-        output({"kind": "error", "message": "nudge unavailable in this FL: " + str(exc)})
+    if _tempo_target is not None:
+        return  # Let a tempo change from the room settle first.
+    base = tempo_bpm()
+    target = round(base * speed, 3)
+    if not 10 <= target <= 522:
         return
-    _nudge = time.monotonic() + length / 1000.0
+    end_nudge()
+    _nudge = dict(base=base, tempo=target, until=time.monotonic() + length / 1000.0, ended=None)
+    write_tempo(target)
 
 
 def _receive(event):
@@ -450,7 +497,7 @@ def _receive(event):
         if playing and delay > 0:
             if current["playing"]:
                 transport.globalTransport(midi.FPT_Play, 1, getattr(event, "pmeflags", midi.PME_System))
-            transport.setSongPos(pos * 1000.0, midi.SONGLENGTH_MS)
+            set_song_pos(pos)
             _pending = dict(playing=True, bpm=bpm, mode=mode, pos=pos, due=time.monotonic() + delay / 1000.0)
             _last = dict(playing=True, bpm=bpm, mode=mode, pos=pos, loop_beats=pattern_beats())
             _applied = str(p["id"])
@@ -462,12 +509,12 @@ def _receive(event):
         toggle = current["playing"] != playing
         if force or toggle or position_distance(current["pos"], pos, current) > 0.15:
             # Using an absolute time avoids project-length dependent normalization.
-            transport.setSongPos(pos * 1000.0, midi.SONGLENGTH_MS)
+            set_song_pos(pos)
         if toggle:
             # FPT_Play is the documented play/pause command, preserving pause.
             flags = getattr(event, "pmeflags", midi.PME_System)
             transport.globalTransport(midi.FPT_Play, 1, flags)
-            transport.setSongPos(pos * 1000.0, midi.SONGLENGTH_MS)
+            set_song_pos(pos)
         _applied = str(p["id"])
         _last = snapshot()  # establish echo-free baseline after applying
         _last_ping = time.monotonic()
