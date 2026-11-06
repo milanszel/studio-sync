@@ -2,11 +2,11 @@
 
 
 
-## 0.10.4 (app) · 0.6.2 (FL script)
+## 0.10.4 (app) · 0.6.3 (FL script)
 
 Reinstall the FL script on every laptop.
 
-* Earlier/Later and drift fixes changed the BPM for everyone (one laptop ended up at 407 BPM). FL's playback speed control misbehaves in some FL versions; nudges now shift the tempo by a fraction of a percent for a moment, which never counts as a tempo change and always returns to the project tempo.
+* Earlier/Later and drift fixes changed the BPM for everyone (one laptop ended up at 407 BPM). FL's playback speed control misbehaves in some FL versions. Corrections no longer touch speed or tempo at all: each one is a tiny move of a few ms on the next bar line.
 
 ## 0.10.3 (app) · 0.6.1 (FL script)
 

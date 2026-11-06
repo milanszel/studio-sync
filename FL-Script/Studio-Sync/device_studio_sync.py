@@ -31,7 +31,7 @@ _tempo_edit_at = 0.0
 # effect and to stop FL's own update of it counting as a local edit.
 _tempo_target = None
 _tempo_reported = False
-VERSION = "0.6.2"
+VERSION = "0.6.3"
 PROTOCOL = 4
 # Seconds without an app ping before the script stops following the app.
 PING_TIMEOUT = 5
@@ -348,7 +348,10 @@ def start_pending():
         if command.get("seek"):
             # Bar aligned correction: move the playhead without stopping.
             if transport.isPlaying():
-                set_song_pos(command["pos"])
+                if "shift" in command:
+                    set_song_pos(max(0.0, song_pos() + command["shift"]))
+                else:
+                    set_song_pos(command["pos"])
             _last = snapshot()
             return
         set_song_pos(command["pos"])
@@ -397,25 +400,32 @@ def _diagnose(event, callback):
 
 
 def nudge(p):
-    """Play a fraction of a percent faster or slower for a moment, to drift back
-    into time without a jump."""
-    global _nudge
+    """Move a few ms toward the room. FL has no reliable way to play a little
+    faster: transport.setPlaybackSpeed jumped to 4x in some versions, and
+    nudging the tempo shows as a BPM change on screen. So the shift the app asks
+    for, (speed - 1) x length, is made as one tiny move on the next bar line,
+    relative to wherever the playhead is then, so timing jitter can't add error."""
+    global _pending
     try:
         speed, length = float(p.get("speed", 1)), float(p.get("ms", 0))
     except (TypeError, ValueError):
         return
     if not (0.97 <= speed <= 1.03 and 0 < length <= 30000) or not transport.isPlaying():
         return
-    if _tempo_target is not None:
-        return  # Let a tempo change from the room settle first.
-    base = tempo_bpm()
-    target = round(base * speed, 3)
-    if not 10 <= target <= 522:
+    if _pending is not None or _waiting is not None or _tempo_target is not None:
         return
-    end_nudge()
-    _nudge = dict(base=base, tempo=target, until=time.monotonic() + length / 1000.0, ended=None)
-    write_tempo(target)
-
+    shift = (speed - 1.0) * length / 1000.0
+    if abs(shift) < 0.002:
+        return
+    bpm = tempo_bpm()
+    bar = bar_beats() * 60.0 / bpm
+    pos = song_pos()
+    wait = bar - (pos % bar)
+    if wait < 0.03:
+        wait += bar
+    if wait > 4.0:
+        wait = 0.0  # Very slow tempo: don't wait several seconds for a bar line.
+    _pending = dict(seek=True, shift=shift, due=time.monotonic() + wait)
 
 def _receive(event):
     global _enabled, _last_ping, _last, _sent, _applied, _applying, _diagnostic_ping, _coordinated, _waiting, _pending

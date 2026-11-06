@@ -409,61 +409,36 @@ class Tests(unittest.TestCase):
     def send_nudge(self, f, speed, ms):
         f.receive(mido.Message("sysex", data=encode(dict(kind="nudge", id="n", speed=speed, ms=ms))))
 
-    def test_nudge_shifts_time_without_changing_the_room_tempo(self):
+    def test_nudge_moves_on_the_bar_without_touching_tempo(self):
         # Earlier/Later and drift fixes used to change FL's BPM for everyone.
         f, out = self.nudge_fl("nudge1")
-        serial = f.script._serial
-        start = f.pos
         f.script.OnRefresh(0)
-        before = len(out)
-        self.send_nudge(f, 1.008, 200)
-        self.assertAlmostEqual(f.bpm, 141.12, places=3)  # FL plays 0.8% faster...
-        for _ in range(30):
-            time.sleep(0.01)
+        serial, before = f.script._serial, len(out)
+        f.pos = 0.5  # Bar is 4 beats at 140 BPM: 1.714 s.
+        self.send_nudge(f, 1.008, 2500)  # Ask for 20 ms ahead.
+        self.assertEqual(f.bpm, 140.0)
+        start, began = f.pos, time.monotonic()
+        while time.monotonic() - began < 1.5:
+            time.sleep(0.005)
             f.script.OnIdle()
             f.script.OnRefresh(0)
-            self.assertEqual(f.script.tempo_bpm(), 140.0)  # ...but the project tempo is unchanged.
-        time.sleep(0.05)
-        f.script.OnIdle()
-        self.assertEqual(f.bpm, 140.0)
-        f.script.OnIdle()
-        self.assertEqual(f.script._serial, serial, "a nudge must not count as a tempo edit")
-        self.assertTrue(all(o.get("bpm", 140.0) == 140.0 for o in out[before:] if o.get("kind") == "status"))
-        elapsed = f.pos - start
-        self.assertGreater(elapsed, 0.3)  # Played on, and a little further than real time.
+            self.assertEqual(f.bpm, 140.0)
+        moved = f.pos - start - (time.monotonic() - began)
+        self.assertAlmostEqual(moved, 0.020, delta=0.004)
+        self.assertGreater(f.target[-1], 1.714)  # The move happened on the bar line.
+        self.assertEqual(f.script._serial, serial, "a nudge must not count as an edit")
+        self.assertTrue(all(o.get("bpm") == 140.0 for o in out[before:] if o.get("kind") == "status"))
 
-    def test_nudge_position_is_in_project_time(self):
+    def test_nudge_backwards(self):
         f, out = self.nudge_fl("nudge2")
-        f.pos = 60.0
-        self.send_nudge(f, 1.008, 5000)
-        # FL's own ms readout jumps by 0.8% at a new tempo; the script must not.
-        self.assertAlmostEqual(f.script.song_pos(), 60.0, delta=0.02)
-        f.script.set_song_pos(30.0)
-        self.assertAlmostEqual(f.pos, 30.0, delta=0.02)
-
-    def test_tempo_change_during_nudge_wins(self):
-        f, out = self.nudge_fl("nudge3")
-        self.send_nudge(f, 0.992, 5000)
-        f.bpm = 150.0  # The user turns the tempo knob mid nudge.
-        f.script.OnIdle()
-        self.assertEqual(f.script.tempo_bpm(), 150.0)
-        self.assertIsNone(f.script._nudge)
-
-    def test_nudge_return_applied_late_is_not_an_edit(self):
-        f, out = self.nudge_fl("nudge4")
-        later = []
-        self.send_nudge(f, 1.008, 50)
-        f.script.mixer.setCurrentTempo = lambda bpm, flag=0: later.append(bpm)
-        f.script.general.processRECEvent = lambda *a: None
-        serial = f.script._serial
-        time.sleep(0.08)
-        f.script.OnIdle()  # Asks FL to go back to 140; FL does it a cycle later.
-        f.script.OnRefresh(0)
-        self.assertEqual(f.script.tempo_bpm(), 140.0)
-        f.bpm = later[-1]
-        f.script.OnRefresh(0)
-        self.assertEqual(f.script._serial, serial)
-        self.assertEqual(f.script.tempo_bpm(), 140.0)
+        f.pos = 1.70
+        self.send_nudge(f, 0.992, 2500)  # 20 ms back; too close to this bar, so the next one.
+        start, began = f.pos, time.monotonic()
+        while time.monotonic() - began < 2.0:
+            time.sleep(0.005)
+            f.script.OnIdle()
+        moved = f.pos - start - (time.monotonic() - began)
+        self.assertAlmostEqual(moved, -0.020, delta=0.004)
 
     def tempo_fl(self, name):
         f = FakeFL(name)
