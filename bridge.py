@@ -3,6 +3,7 @@
 import collections
 import hmac
 import json
+import math
 import queue
 import select
 import socket
@@ -170,6 +171,9 @@ class Bridge:
         self.pake = None
         self.handshakes = {}
         self.hellos = []
+        self.trusted = set()  # Host: IPs that have proved the code; never rate limited.
+        self.wall_clock = time.time  # This laptop's clock (tests set it wrong on purpose).
+        self.wall_offset = 0.0  # Joiner: host wall clock minus ours, so packets don't depend on clock settings.
         self.last_hello = 0
         self.wrong_code = False
         self.name = short_name(name or socket.gethostname())
@@ -281,6 +285,10 @@ class Bridge:
 
     # ---- network ----------------------------------------------------------
 
+    def room_time(self):
+        """The host's wall clock, which every laptop in the room stamps packets with."""
+        return self.wall_clock() + (0.0 if self.host else self.wall_offset)
+
     def note(self, message):
         """Remember a network problem; it shows for a few seconds after it last happened."""
         self.problems[message] = time.monotonic()
@@ -307,7 +315,7 @@ class Bridge:
         self.counter += 1
         packet = sign(
             self.key,
-            dict(kind=kind, node=self.node, protocol=APP_PROTOCOL, ts=time.time(), n=self.counter, **kw),
+            dict(kind=kind, node=self.node, protocol=APP_PROTOCOL, ts=self.room_time(), n=self.counter, **kw),
         )
         try:
             self.sock.sendto(json.dumps(packet).encode(), addr)
@@ -369,7 +377,9 @@ class Bridge:
             return
         if p.get("node") == self.node:
             return
-        if not self.guard.check(p.get("node"), p.get("n"), p.get("ts"), time.time()):
+        if self.host:
+            self.trusted.add(addr[0])  # Signed with the room secret: this laptop knows the code.
+        if not self.guard.check(p.get("node"), p.get("n"), p.get("ts"), self.room_time()):
             if self.guard.clock_error is not None:
                 self.note(
                     "Laptop clocks differ by %d seconds. Turn on automatic date and time on every laptop."
@@ -455,8 +465,10 @@ class Bridge:
             self.send_plain(addr, "welcome", **cached["reply"])  # A repeated hello; same answer.
             return
         # Every handshake is one guess at the code, so limit how fast anyone can guess.
-        self.hellos = [h for h in self.hellos if now - h[0] < 60]
-        if sum(1 for h in self.hellos if h[1] == addr[0]) >= 10 or len(self.hellos) >= 30:
+        self.hellos = [h for h in self.hellos if now - h[0] < 60 and h[1] not in self.trusted]
+        if addr[0] in self.trusted:
+            pass  # A laptop that already proved the code, rejoining: never limited.
+        elif sum(1 for h in self.hellos if h[1] == addr[0]) >= 10 or len(self.hellos) >= 30:
             self.note(
                 "A laptop at %s keeps trying to join. If it isn't yours, change the room code." % addr[0]
             )
@@ -474,6 +486,7 @@ class Bridge:
             pake=reply.hex(),
             proof=handshake_proof(key, "host", attempt),
             secret=wrap_secret(key, attempt, self.key).hex(),
+            time=self.wall_clock(),
         )
         self.handshakes = {a: h for a, h in self.handshakes.items() if now - h["at"] < 30}
         self.handshakes[attempt] = dict(reply=fields, at=now)
@@ -516,6 +529,11 @@ class Bridge:
         if len(secret) == 32:
             self.key = secret
             self.full = False
+            host_time = p.get("time")
+            if type(host_time) in (int, float) and math.isfinite(host_time):
+                # Use the host's wall clock for packet times, so a laptop whose
+                # clock is set wrong still connects.
+                self.wall_offset = host_time - self.wall_clock()
 
     def roster_for(self, node, now):
         """Everyone else in the room, so joiners can show names and share directly."""

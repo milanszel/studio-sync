@@ -275,6 +275,42 @@ class NetworkTests(unittest.TestCase):
         finally:
             room.close()
 
+    def test_laptop_with_wrong_clock_still_joins(self):
+        # A laptop whose clock was 10 minutes off kept rejoining until the host
+        # blocked it as "keeps trying to join".
+        room = Room(0)
+        try:
+            with patch.object(mido, "open_output", lambda name, **k: Resource()), patch.object(
+                mido, "open_input", lambda name, callback, **k: Resource()
+            ):
+                guest = Bridge(False, "127.0.0.1", CODE, "a", "b", name="Off Clock")
+            guest.wall_clock = lambda: time.time() + 600
+            try:
+                host = room.bridges[0]
+                self.assertTrue(room.wait(lambda: host.live_members(time.monotonic()), 5), host.network_error)
+                room.wait(lambda: False, 3)
+                self.assertTrue(guest.connected(time.monotonic()))
+                self.assertNotIn("keeps trying", host.network_error)
+            finally:
+                guest.close()
+        finally:
+            room.close()
+
+    def test_known_laptop_rejoining_is_never_blocked(self):
+        room = Room(1)
+        try:
+            self.assertTrue(room.wait(room.ready, 8))
+            host, guest = room.bridges
+            for _ in range(15):  # A flaky WiFi makes it rejoin over and over.
+                guest.key = None
+                guest.pake = None
+                guest.send_hello(time.monotonic())
+                room.wait(lambda: guest.key is not None, 2)
+            self.assertIsNotNone(guest.key)
+            self.assertNotIn("keeps trying", host.network_error)
+        finally:
+            room.close()
+
     def test_wrong_code_is_refused_and_guessing_is_limited(self):
         room = Room(0)
         try:

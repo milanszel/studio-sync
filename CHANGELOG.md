@@ -3,6 +3,12 @@
 
 
 
+
+## 0.11.1 (app) · FL script unchanged (0.6.4)
+
+* A laptop whose clock was set more than 30 seconds off couldn't stay connected; it kept rejoining until the host blocked it with "keeps trying to join". Every laptop now uses the host's clock for its packets, so clock settings no longer matter.
+* A laptop that has already proved the room code is never blocked for rejoining. Only real wrong guesses count toward the limit.
+
 ## 0.11.0 (app) · 0.6.4 (FL script)
 
 Update every laptop and reinstall the FL script on each.

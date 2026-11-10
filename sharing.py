@@ -37,9 +37,9 @@ class Peer:
         self.conn = None
         self.lock = threading.Lock()
 
-    def post(self, key, path, payload, timeout):
+    def post(self, key, path, payload, timeout, clock=time.time):
         headers = {
-            AUTH_HEADER: request_auth(key, "POST", path, payload),
+            AUTH_HEADER: request_auth(key, "POST", path, payload, clock()),
             "Content-Length": str(len(payload)),
             "Content-Type": "application/octet-stream",
         }
@@ -64,7 +64,7 @@ class Peer:
                     if attempt:
                         raise ValueError("Couldn't reach " + self.name + ": " + str(exc))
                     # A kept alive connection may have been closed by the other side; retry once fresh.
-                    headers[AUTH_HEADER] = request_auth(key, "POST", path, payload)
+                    headers[AUTH_HEADER] = request_auth(key, "POST", path, payload, clock())
 
     def close(self):
         if self.conn is not None:
@@ -156,6 +156,10 @@ class Sharing:
         self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.server_thread.start()
 
+    def room_time(self):
+        clock = getattr(self.bridge, "room_time", None)
+        return clock() if callable(clock) else time.time()
+
     @property
     def key(self):
         """The room secret, once this laptop has joined (it can change if the host restarts)."""
@@ -174,7 +178,7 @@ class Sharing:
         return next((t[2] for t in self.targets() if t[0] == ip), ip)
 
     def signed(self, path, body, header):
-        return bool(self.key) and self.nonces.check(self.key, "POST", path, body, header, time.time())
+        return bool(self.key) and self.nonces.check(self.key, "POST", path, body, header, self.room_time())
 
     def peer(self, ip, port, name):
         with self.lock:
@@ -285,7 +289,7 @@ class Sharing:
         ).encode()
         for peer in peers:
             try:
-                peer.post(self.key, "/transfer-start", body, 10)
+                peer.post(self.key, "/transfer-start", body, 10, self.room_time)
                 job["peers"].append(peer)
             except ValueError as exc:
                 job["failed"].append(str(exc))
@@ -310,7 +314,7 @@ class Sharing:
         path = "/chunk?id=" + ident + "&offset=" + str(offset)
         for peer in list(job["peers"]):
             try:
-                peer.post(self.key, path, raw, 120)
+                peer.post(self.key, path, raw, 120, self.room_time)
             except ValueError as exc:
                 # One laptop dropping out must not stop the others' copies.
                 job["peers"].remove(peer)
@@ -333,7 +337,7 @@ class Sharing:
         delivered = []
         for peer in job["peers"]:
             try:
-                peer.post(self.key, "/transfer-finish", body, 30)
+                peer.post(self.key, "/transfer-finish", body, 30, self.room_time)
                 delivered.append(peer.name)
             except ValueError as exc:
                 job["failed"].append(str(exc))
@@ -366,7 +370,7 @@ class Sharing:
         body = json.dumps(dict(id=ident)).encode()
         for peer in job["peers"]:
             try:
-                peer.post(self.key, "/transfer-cancel", body, 2)
+                peer.post(self.key, "/transfer-cancel", body, 2, self.room_time)
             except ValueError:
                 pass
 
@@ -469,7 +473,7 @@ class Sharing:
                     if digest != last_digest or cycle_started - last_sent >= FRAME_KEEPALIVE:
                         for peer in self.targets_quietly():
                             try:
-                                peer.post(self.key, "/frame", raw, 0.75)
+                                peer.post(self.key, "/frame", raw, 0.75, self.room_time)
                             except ValueError:
                                 pass
                         last_digest, last_sent = digest, cycle_started
@@ -483,7 +487,7 @@ class Sharing:
                     self.local_frame = None
                 for peer in self.targets_quietly():
                     try:
-                        peer.post(self.key, "/view-off", b"{}", 1)
+                        peer.post(self.key, "/view-off", b"{}", 1, self.room_time)
                     except ValueError:
                         pass
 

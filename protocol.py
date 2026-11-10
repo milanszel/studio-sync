@@ -291,11 +291,13 @@ def request_mac(key, method, path, body, ts, nonce):
     return hmac.new(key, message, hashlib.sha256).hexdigest()
 
 
-def request_auth(key, method, path, body):
+def request_auth(key, method, path, body, now=None):
+    """now: the room's wall clock (see Bridge.room_time), so laptops whose
+    clocks are set differently still accept each other's requests."""
     import secrets
     import time
 
-    ts, nonce = int(time.time()), secrets.token_hex(12)
+    ts, nonce = int(time.time() if now is None else now), secrets.token_hex(12)
     return "%d:%s:%s" % (ts, nonce, request_mac(key, method, path, body, ts, nonce))
 
 
