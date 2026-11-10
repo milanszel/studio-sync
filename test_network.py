@@ -239,6 +239,30 @@ class NetworkTests(unittest.TestCase):
         finally:
             room.close()
 
+    def test_old_fl_script_cannot_change_the_room_tempo(self):
+        # Old scripts corrected drift by changing FL's speed or tempo, which
+        # spread to everyone as a BPM jump.
+        room = Room(2)
+        try:
+            room.fls[2].script.PROTOCOL = 4
+            self.assertTrue(room.wait(room.ready, 8))
+            room.wait(lambda: any(p["outdated"] for p in room.bridges[0].people(time.monotonic())), 4)
+            room.fls[2].bpm = 150.813
+            self.assertTrue(
+                room.wait(lambda: room.fls[2].bpm == 120.0, 4), "the old laptop is put back on the room tempo"
+            )
+            self.assertEqual(room.fls[0].bpm, 120.0)
+            self.assertEqual(room.fls[1].bpm, 120.0)
+            # An up to date laptop still changes tempo for everyone, and it is logged.
+            room.fls[1].bpm = 140.0
+            self.assertTrue(room.wait(lambda: all(fl.bpm == 140.0 for fl in room.fls[:2]), 4))
+            host = room.bridges[0]
+            host.track_tempo(time.monotonic())
+            self.assertEqual(host.tempo_change["by"], "Guest 1")
+            self.assertEqual(host.tempo_change["new"], 140.0)
+        finally:
+            room.close()
+
     def test_fast_and_slow_tempos_sync(self):
         # FL allows 10 to 522 BPM; a 407 BPM project used to be rejected.
         room = Room(1)

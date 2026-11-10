@@ -2,6 +2,15 @@
 
 
 
+
+## 0.11.0 (app) · 0.6.4 (FL script)
+
+Update every laptop and reinstall the FL script on each.
+
+* A laptop with an older FL script can no longer change the room's tempo. Older scripts corrected drift by changing FL's speed or tempo, which spread to everyone as a BPM jump. That laptop shows in red and is put back on the room tempo.
+* Diagnostics shows the last tempo change: from what, to what, by which laptop and when. It is also written to the log.
+* Mac installer builds again (GitHub retired the macOS 14 machines).
+
 ## 0.10.4 (app) · 0.6.3 (FL script)
 
 Reinstall the FL script on every laptop.

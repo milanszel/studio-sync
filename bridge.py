@@ -209,6 +209,8 @@ class Bridge:
         self.last_correction = 0
         self.corrections = 0
         self.nudges = 0
+        self.room_bpm = None
+        self.tempo_change = None
         self.nudge_ok = True
         self.nudge_until = 0
         self.nudge_epoch = 0
@@ -667,9 +669,30 @@ class Bridge:
             baseline=self.local["serial"] == self.baseline_serial,
         )
 
+    def protocol_of(self, node):
+        if node == self.node:
+            return fl_protocol(self.local)
+        return self.members.get(node, {}).get("fl_protocol", 0)
+
+    def name_of(self, node):
+        if node == self.node:
+            return "this laptop"
+        if node in self.members:
+            return self.members[node].get("name", "Laptop")
+        for r in self.roster:
+            if r["node"] == node:
+                return r["name"]
+        return "another laptop"
+
     def accept_sample(self, node, serial, seq, sample, at, now, request=False, baseline=False):
         before = self.authority.revision
         old = self.authority.state
+        if old and self.protocol_of(node) < FL_PROTOCOL and abs(sample["bpm"] - old["bpm"]) > 0.005:
+            # Older FL scripts changed FL's speed or tempo to correct drift, which
+            # looked like a tempo change. Never let one change the room's tempo.
+            if sample["playing"] == old["playing"] and sample["mode"] == old["mode"]:
+                return  # Only the tempo moved: ignore it, so that laptop is set back.
+            sample = dict(sample, bpm=old["bpm"])
         # A prepared start must retain its future timestamp until it fires.
         scheduled = bool(old and old.get("scheduled") and old["source"] == node and now < old["at"])
         self.authority.update(node, serial, seq, sample, at, baseline=baseline)
@@ -1077,7 +1100,22 @@ class Bridge:
                 pass
             self.cleanup()
 
+    def track_tempo(self, now):
+        """Remember who last changed the room tempo, for the diagnostics."""
+        s = self.state
+        if not s:
+            return
+        if self.room_bpm is not None and abs(s["bpm"] - self.room_bpm) > 0.005:
+            self.tempo_change = dict(
+                old=self.room_bpm, new=s["bpm"], by=self.name_of(s.get("source")), at=time.time()
+            )
+            print(
+                "Tempo %.3f -> %.3f by %s" % (self.room_bpm, s["bpm"], self.tempo_change["by"]), flush=True
+            )
+        self.room_bpm = s["bpm"]
+
     def report(self, now, live):
+        self.track_tempo(now)
         people = self.people(now)
         outdated = [p["name"] for p in people if p["outdated"]]
         keys = [dict(name=p["name"], **p["audio_key"]) for p in people if p.get("audio_key")]
@@ -1100,6 +1138,7 @@ class Bridge:
                 start_mode=self.start_mode,
                 corrections=self.corrections,
                 nudges=self.nudges,
+                tempo_change=self.tempo_change,
                 phase_ms=self.phase_error * 1000 if self.phase_error is not None else None,
                 following=bool(self.state and self.state.get("source") != self.node and live),
                 audio_delay_ms=self.audio_delay * 1000,

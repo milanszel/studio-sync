@@ -159,7 +159,7 @@ class Authority:
 # Wire protocol between the apps. Bump when packets change incompatibly.
 APP_PROTOCOL = 4
 # FL controller script protocol. 2 adds the timed 'fire' start, 3 adds timed seeks.
-FL_PROTOCOL = 4
+FL_PROTOCOL = 5
 # Laptops in one room, host included.
 MAX_MEMBERS = 8
 # Packets older or newer than this (wall clock seconds) are rejected as replays.
