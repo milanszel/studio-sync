@@ -48,8 +48,23 @@ if ! grep -q '^OK' build/self-test.txt 2>/dev/null; then
   cat build/self-test.txt 2>/dev/null
   fail 'the built app is missing something (listed above).'
 fi
-# Ad hoc signature so Apple Silicon runs it and permissions stick to the app.
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || fail 'could not sign the app.'
+if [ -n "$SIGN_IDENTITY" ]; then
+  # Developer ID signature with the hardened runtime, inside out, so Apple
+  # can notarize it and Macs open it without a warning.
+  echo '     Signing with '"$SIGN_IDENTITY"
+  find "$APP/Contents" -type f -print0 | while IFS= read -r -d '' f; do
+    if file -b "$f" | grep -q 'Mach-O'; then
+      codesign --force --timestamp --options runtime --entitlements packaging/entitlements.plist \
+        --sign "$SIGN_IDENTITY" "$f" || exit 1
+    fi
+  done || fail 'could not sign the files inside the app.'
+  codesign --force --timestamp --options runtime --entitlements packaging/entitlements.plist \
+    --sign "$SIGN_IDENTITY" "$APP" || fail 'could not sign the app.'
+  codesign --verify --deep --strict "$APP" || fail 'the app signature does not verify.'
+else
+  # Ad hoc signature so Apple Silicon runs it and permissions stick to the app.
+  codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || fail 'could not sign the app.'
+fi
 
 if [ -n "$CI" ]; then
   echo '5/6  Skipping install on the build server.'
@@ -86,6 +101,22 @@ for attempt in 1 2 3; do
   sleep 3
 done
 [ -n "$made" ] || fail 'could not make the disk image.'
+if [ -n "$SIGN_IDENTITY" ]; then
+  codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG" || fail 'could not sign the disk image.'
+  if [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+    echo '     Notarizing with Apple (a few minutes)…'
+    xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" \
+      --team-id "$APPLE_TEAM_ID" --wait --timeout 30m > build/notary.txt 2>&1
+    cat build/notary.txt
+    if ! grep -q 'status: Accepted' build/notary.txt; then
+      id=$(awk '/^  id:/{print $2; exit}' build/notary.txt)
+      [ -n "$id" ] && xcrun notarytool log "$id" --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" \
+        --team-id "$APPLE_TEAM_ID"
+      fail 'Apple did not accept the app (log above).'
+    fi
+    xcrun stapler staple "$DMG" || fail 'could not attach the notarization to the disk image.'
+  fi
+fi
 
 echo
 echo "Installer for Macs ($ARCH): $DMG"
