@@ -27,7 +27,7 @@ from updater import Updater
 # PyInstaller's unpack folder when running as an installed app.
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 FROZEN = bool(getattr(sys, "frozen", False))
-VERSION = "0.12.0"
+VERSION = "0.12.1"
 
 
 def write_json_atomic(path, data):

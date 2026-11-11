@@ -5,6 +5,11 @@
 
 
 
+
+## 0.12.1 (app) · FL script unchanged (0.6.4)
+
+* The app shows its version, with a Check for updates button, at the top of the window.
+
 ## 0.12.0 (app) · FL script unchanged (0.6.4)
 
 Install this one by hand on every laptop. After this, Studio Sync updates itself.
