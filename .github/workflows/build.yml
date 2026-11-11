@@ -61,7 +61,7 @@ jobs:
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || '77G5P5Z578' }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID || '5LUV9FY9J6' }}
         run: ./Build-Mac-App.command
       - uses: actions/upload-artifact@v4
         with:
