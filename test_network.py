@@ -285,6 +285,7 @@ class NetworkTests(unittest.TestCase):
             ):
                 guest = Bridge(False, "127.0.0.1", CODE, "a", "b", name="Off Clock")
             guest.wall_clock = lambda: time.time() + 600
+            guest.key = guest.pake = None  # Join again with the wrong clock in place.
             try:
                 host = room.bridges[0]
                 self.assertTrue(room.wait(lambda: host.live_members(time.monotonic()), 5), host.network_error)
