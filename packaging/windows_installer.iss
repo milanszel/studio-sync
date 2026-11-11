@@ -54,6 +54,8 @@ Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""S
 Filename: "https://www.tobias-erichsen.de/software/loopmidi.html"; Description: "Download loopMIDI (needed for the two MIDI ports)"; Flags: postinstall shellexec skipifsilent; Check: not LoopMidiInstalled
 Filename: "https://go.microsoft.com/fwlink/p/?LinkId=2124703"; Description: "Download Microsoft WebView2 (needed to show the Studio Sync window)"; Flags: postinstall shellexec skipifsilent; Check: not WebView2Installed
 Filename: "{app}\Studio Sync.exe"; Description: "Open Studio Sync"; Flags: postinstall nowait skipifsilent
+; After an in app update (a silent install), open the new version.
+Filename: "{app}\Studio Sync.exe"; Flags: nowait runasoriginaluser; Check: WizardSilent
 
 [UninstallRun]
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Studio Sync"""; Flags: runhidden; RunOnceId: "RemoveFirewallRule"

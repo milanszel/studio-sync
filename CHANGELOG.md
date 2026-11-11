@@ -4,6 +4,14 @@
 
 
 
+
+## 0.12.0 (app) · FL script unchanged (0.6.4)
+
+Install this one by hand on every laptop. After this, Studio Sync updates itself.
+
+* Updates: Studio Sync checks for a new version when it opens and every 6 hours. Click Update and it downloads, checks and installs the new version, then reopens. Downloads come from the public milanszel/studio-sync-releases repo; the code stays private.
+* The FL script updates with the app. When a new app version opens, it replaces an installed older FL script (keeping a backup) and asks you to restart FL Studio.
+
 ## 0.11.1 (app) · FL script unchanged (0.6.4)
 
 * A laptop whose clock was set more than 30 seconds off couldn't stay connected; it kept rejoining until the host blocked it with "keeps trying to join". Every laptop now uses the host's clock for its packets, so clock settings no longer matter.

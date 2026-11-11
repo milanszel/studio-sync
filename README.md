@@ -1,4 +1,4 @@
-# Studio Sync 0.11.1
+# Studio Sync 0.12.0
 
 Links up to 8 FL Studio sessions on the same local network so play, pause, position, tempo and loop mode stay together. It also sends files, shows your partner's FL window, and estimates the key of what is playing.
 
@@ -22,6 +22,12 @@ The installers are not signed with a paid certificate yet, so the first launch o
 An installed app keeps its log in `~/.studio-sync/studio-sync.log`.
 
 To run from source instead, use `Start-Mac.command` or `Start-Windows.bat`.
+
+## Updates
+
+Studio Sync checks for updates when it opens. When one is available, a blue bar shows **Update**: it downloads the new version, checks it, installs it and reopens. The FL script is updated with it; restart FL Studio when asked. Update every laptop in the room.
+
+Downloads: https://github.com/milanszel/studio-sync-releases
 
 ## Requirements
 

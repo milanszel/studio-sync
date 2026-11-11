@@ -21,12 +21,13 @@ import mido
 from bridge import Bridge
 from discovery import find_hosts
 from protocol import FL_PROTOCOL, check_code, new_code
+from updater import Updater
 
 # Bundled data (interface pages, FL script) lives next to the code, or in
 # PyInstaller's unpack folder when running as an installed app.
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 FROZEN = bool(getattr(sys, "frozen", False))
-VERSION = "0.11.1"
+VERSION = "0.12.0"
 
 
 def write_json_atomic(path, data):
@@ -82,7 +83,47 @@ class Controller:
         self.app_url = None
         self.history = collections.deque(maxlen=500)
         self.last_health = None
+        self.updater = Updater(VERSION, FROZEN)
+        self.fl_script_updated = None
         self.record("App opened")
+
+    # ---- FL script ---------------------------------------------------------
+
+    def fl_folders(self):
+        """FL Studio user data folders this laptop might use."""
+        home = Path.home()
+        folders = []
+        if self.settings.get("fl_folder"):
+            folders.append(Path(self.settings["fl_folder"]))
+        folders.append(home / "Documents" / "Image-Line" / "FL Studio")
+        if sys.platform.startswith("win"):
+            for name in ("OneDrive", "OneDrive - Personal"):
+                folders.append(home / name / "Documents" / "Image-Line" / "FL Studio")
+        return [f for i, f in enumerate(folders) if f not in folders[:i]]
+
+    def sync_fl_script(self):
+        """Keep the FL script in step with the app, so an app update is the
+        only thing anyone installs. Updates installed copies only."""
+        bundled = ROOT / "FL-Script" / "Studio-Sync" / "device_studio_sync.py"
+        try:
+            new = bundled.read_bytes()
+        except OSError:
+            return
+        version = re.search(rb'VERSION = "([^"]+)"', new)
+        for folder in self.fl_folders():
+            target = folder / "Settings" / "Hardware" / "Studio-Sync" / "device_studio_sync.py"
+            try:
+                if not target.is_file() or target.read_bytes() == new:
+                    continue
+                shutil.copy2(target, target.with_suffix(".py.backup"))
+                temp = target.with_suffix(".py.tmp")
+                temp.write_bytes(new)
+                os.replace(temp, target)
+            except OSError as exc:
+                self.record("Couldn't update the FL script in %s: %s" % (folder, exc))
+                continue
+            self.fl_script_updated = version.group(1).decode() if version else "the new version"
+            self.record("FL script updated in " + str(folder))
 
     def start_auto_listen(self):
         self.auto_listen = True
@@ -176,7 +217,9 @@ class Controller:
             if health != self.last_health:
                 self.record(dict(running=health[0], fl=health[1], peer=health[2], error=health[3]))
                 self.last_health = health
-            if self.bridge and not running:
+            if self.fl_script_updated and self.current.get("fl_protocol", 0) < FL_PROTOCOL:
+                hint = "The FL script was updated to %s. Restart FL Studio to load it." % self.fl_script_updated
+            elif self.bridge and not running:
                 hint = "Connection stopped. Disconnect, then connect again."
             elif not self.bridge:
                 hint = "Choose Host or Join, then connect. Your last room and MIDI ports are saved."
@@ -207,6 +250,9 @@ class Controller:
                 running=running,
                 status=dict(self.current),
                 hint=hint,
+                update=self.updater.state(),
+                fl_script_updated=self.fl_script_updated,
+                version=VERSION,
             )
 
     def dialog(self, kind, **kwargs):
@@ -413,6 +459,10 @@ class Controller:
                 target = folder / name
                 target.write_text(json.dumps(report, indent=2), encoding="utf-8")
                 return dict(message="Diagnostic log saved to " + str(target))
+            elif action == "update-install":
+                self.updater.install()
+            elif action == "update-check":
+                threading.Thread(target=self.updater.check, daemon=True).start()
             elif action == "install":
                 folder = Path(str(data.get("folder", ""))).expanduser()
                 if not folder.is_dir() or not str(data.get("folder", "")).strip():
@@ -423,6 +473,8 @@ class Controller:
                 if target.exists():
                     shutil.copy2(target, target.with_suffix(".py.backup"))
                 shutil.copy2(ROOT / "FL-Script" / "Studio-Sync" / "device_studio_sync.py", target)
+                self.settings["fl_folder"] = str(folder)
+                self.save_settings()
                 return dict(message="Script installed. Restart FL Studio or update MIDI scripts.")
             elif action == "ports":
                 return dict(
@@ -729,6 +781,8 @@ def main():
         # Hand the GIL over sooner so the sync thread isn't held up by other work.
         sys.setswitchinterval(0.001)
         controller = Controller(ports)
+        controller.sync_fl_script()
+        controller.updater.start()
         if controller.settings.get("listen"):
             # Listening is opt in; resume only if it was on last time.
             controller.start_auto_listen()
