@@ -27,7 +27,7 @@ from updater import Updater
 # PyInstaller's unpack folder when running as an installed app.
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 FROZEN = bool(getattr(sys, "frozen", False))
-VERSION = "0.12.1"
+VERSION = "0.13.0"
 
 
 def write_json_atomic(path, data):
@@ -328,7 +328,7 @@ class Controller:
                         height=400,
                         min_size=(360, 260),
                         on_top=True,
-                        background_color="#f3f5f9",
+                        background_color="#0f1114",
                     )
                     self.partner_window = window
 
@@ -794,7 +794,7 @@ def main():
         controller.app_url = url
         print("Studio Sync " + VERSION + " is running. Close its window to quit.", flush=True)
         controller.window = webview.create_window(
-            "Studio Sync", url, width=600, height=820, min_size=(480, 650), background_color="#e5e6ef"
+            "Studio Sync", url, width=600, height=820, min_size=(480, 650), background_color="#0f1114"
         )
 
         def close_partner():

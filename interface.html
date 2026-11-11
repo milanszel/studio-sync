@@ -69,6 +69,68 @@
 .syncrow #syncstate.fixing{color:#b07d10}
 .offsetctl{display:flex;align-items:center;gap:8px}
 .offsetctl output{min-width:52px;text-align:center;font-variant-numeric:tabular-nums}
+
+/* ===== Dark studio theme (0.13). Last layer: overrides everything above. ===== */
+:root{--bg:#0f1114;--panel:#171a1f;--panel2:#1e2229;--line:#2a2f38;--line2:#353b46;--text:#e8eaee;--muted:#8d95a3;--faint:#5f6775;--accent:#ff8a3d;--accent2:#ff6a1a;--ok:#3ddc97;--warn:#f2b84b;--bad:#ff6b6b;color-scheme:dark;color:var(--text);background:var(--bg)}
+body{background:radial-gradient(ellipse at 50% -20%,#ff8a3d14,transparent 60%),var(--bg);color:var(--text)}
+::selection{background:#ff8a3d55}
+button:focus-visible,input:focus-visible,summary:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sidebar{background:#121519e6;border-bottom:1px solid var(--line);backdrop-filter:blur(18px)}
+.brand{color:var(--text)}.brand-icon{background:linear-gradient(140deg,#ff9b52,#ff6a1a);box-shadow:0 4px 14px #ff6a1a40,inset 0 1px 0 #ffffff40}
+.sidebar .nav{background:var(--panel2);border-color:var(--line2);color:var(--muted)}.sidebar .nav:hover,.sidebar .nav.active{color:var(--text);background:#262b33}
+.version{color:var(--muted)}.version .textbutton{color:var(--accent)}#updatestatus{color:var(--faint)}
+h1,h2,h3,.welcome h2,.featurehead h2,.filesintro h2,.sendcard strong,.sharedfilename,.setuphero h2,.step h3{color:var(--text)}
+.welcome h2{font-size:28px;letter-spacing:-1px}
+.welcome p,.healthcopy,.helper,.help,.step p,.statusnote,.metric span,.link,.setuphero p,.featurehint,.keyresult>span,.filesintro p,.sendcard span,.sharedmeta,.fileempty,.filelisthead span,.searchnotice,#sessionrole,.sessioncaption,.eyebrow,.partnerresult,.viewplaceholder p,.zoomcontrols output,.settingsrow small,.settingsrow>span,.setupstatus,label,.badge{color:var(--muted)}
+.card,.keycard,.readerpanel,.viewpanel,#collab-files .filespanel .sendcard,.sendcard,.sharedfile,#session .keycard{background:var(--panel);border:1px solid var(--line);box-shadow:0 10px 30px #00000040}
+.setuphero{background:linear-gradient(125deg,var(--panel),#1d1712)}.appmark{background:linear-gradient(145deg,#ff9b52,#ff6a1a)}
+.stepnum{background:#ff8a3d1f;color:var(--accent)}.step{border-color:var(--line)}
+details,.filesettings,.senthistory,.settingsrow,.partnerresult{border-color:var(--line)!important}
+summary{color:var(--muted)}summary:after{color:var(--faint)}
+input,select,#startmode,#viewpeer{background:var(--panel2)!important;border:1px solid var(--line2)!important;color:var(--text)!important}
+input:disabled{color:var(--faint)!important;background:#15181c!important}input::placeholder{color:var(--faint)}
+.button{background:var(--panel2);border:1px solid var(--line2);color:var(--text);box-shadow:none}
+.button:hover{background:#2a2f38}
+.button.primary,.button.primary:hover:not(:disabled){background:linear-gradient(#ff9550,#ff7426);border-color:#ff7a2e;color:#1a0d04;font-weight:700;box-shadow:0 6px 18px #ff6a1a35,inset 0 1px 0 #ffffff50}
+.textbutton{color:var(--accent)}
+.segment,.collabtabs,.viewsource{background:#0b0d10;border:1px solid var(--line)}
+.segment button,.collabtabs button,.viewsource button{color:var(--muted)}
+.segment button.active,.collabtabs button.active,.viewsource button.active,.segment button.active:hover{background:var(--panel2);color:var(--text);box-shadow:0 1px 0 #ffffff10 inset,0 2px 8px #00000060}
+.segment button:not(.active):hover:not(:disabled),.collabtabs button:not(.active):hover{background:#1a1d22;color:var(--text)}
+.top #openshare{background:#ff8a3d1a;border:1px solid #ff8a3d45;color:var(--accent)}.top #openshare:hover{background:#ff8a3d2b;border-color:#ff8a3d70}
+.badge{background:none}.dot,.link i,.members li i{background:#4a515d}
+.badge.ready .dot,.link.ready i,.members li.ready i{background:var(--ok);box-shadow:0 0 8px #3ddc9780}
+.badge.waiting .dot{background:var(--warn)}
+.link.ready,.members li.ready{color:var(--ok)}.members li{color:var(--muted)}.members li.outdated{color:var(--bad)}
+.error{background:#ff6b6b14;border-color:#ff6b6b40;color:#ff9b9b}
+.updatebar{background:#ff8a3d14;border-color:#ff8a3d45;color:var(--text)}.updatebar strong{color:var(--accent)}
+.leveltrack{background:#0b0d10}.leveltrack i{background:linear-gradient(90deg,#ff9b52,#ff6a1a)}
+#updateprogress i{background:linear-gradient(90deg,#ff9b52,#ff6a1a)}
+.playback{border-top:1px solid var(--line)}
+.monitorpanel{background:linear-gradient(180deg,#0b0d10,#0e1114);border:1px solid var(--line);box-shadow:inset 0 1px 0 #ffffff06}
+.monitorheading{color:var(--faint)}
+.transport{color:var(--text)!important;font-weight:650}
+.metric strong{color:var(--text)}.playback .metric+.metric{border-color:var(--line)}
+.metrics{border-color:var(--line)}
+#bpm{color:var(--accent)}
+/* The sync row is the thing to watch while playing: make it big and clear. */
+.syncrow{max-width:420px;margin:6px auto 16px;padding:14px 16px;background:var(--panel);border:1px solid var(--line);border-radius:14px;color:var(--muted)}
+.syncrow #syncstate{font-size:15px;font-weight:700;color:var(--text)}
+.syncrow #syncstate.ok{color:var(--ok)}.syncrow #syncstate.fixing{color:var(--warn)}
+.offsetctl output{color:var(--text)}
+#sessionidentity #roomidentity{color:var(--text);font-size:30px;letter-spacing:5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.sessioncaption{color:var(--accent)}
+body.linked #disconnect{color:var(--muted)}
+.keyresult>strong{color:var(--text)}
+.portchoice{background:var(--panel2);border-color:var(--line2);color:var(--muted)}.portchoice.selected{background:#ff8a3d14;border-color:#ff8a3d70;color:var(--accent)}
+.diag{color:var(--muted)}
+.fileempty{border-color:var(--line2)}.sharedfilename{color:var(--text)}
+.viewplaceholder{background:#0b0d10;border-color:var(--line)}.viewplaceholder strong{color:var(--text)}
+#notecanvas,#partnerframe{border-color:var(--line)}
+.setupstatus.ready{color:var(--ok)}
+.footer{color:var(--faint)}
+.settingslinks{background:var(--panel);border-color:var(--line)}.settingslinks .nav{color:var(--text);background:transparent}.settingslinks .nav:hover{background:var(--panel2)}.settingslinks .nav+.nav{border-color:var(--line)}.settingslinks .nav span{color:var(--faint)}
+.guide summary,#setup details summary{color:var(--text)}
 </style></head><body><div class="shell"><aside class="sidebar"><div class="brand"><span class="brand-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12h3l2-6 4 12 3-9 2 3h4"/></svg></span>Studio Sync</div><button class="nav" data-page="setup" aria-label="Settings"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="8" cy="17" r="2"/></svg></button><div class="version"><div id="appversion">Studio Sync</div><button class="textbutton" id="checkupdate">Check for updates</button><div id="updatestatus" aria-live="polite"></div></div></aside><main class="main"><header class="top"><button class="textbutton nav" data-page="session" id="back" hidden>‹ Back</button><h1 id="title">Session</h1><button class="nav sharelink" data-page="share" id="openshare"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 21v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6m2 4a5 5 0 0 1 3 4v2"/></svg><span>Collaborate</span></button><div class="badge" id="badge"><i class="dot"></i><span id="connection">Not connected</span></div></header><div class="error" id="error" role="alert"></div><div class="updatebar" id="updatebar" hidden><div><strong id="updatetitle"></strong><span id="updatetext"></span><div class="leveltrack" id="updateprogress" hidden><i id="updateprogressbar"></i></div></div><button class="button primary compact" id="updatebtn" hidden>Update</button></div>
 <section class="page" id="session"><div class="welcome"><h2>Make music together.</h2><p>Keep every FL Studio session in the room in time. Up to 8 laptops.</p></div><div class="connectionpanel"><div class="segment" id="roles"><button id="host" class="active" aria-pressed="true">Host a session</button><button id="join" aria-pressed="false">Join a session</button></div><div id="sessionidentity" hidden><span class="sessioncaption">ROOM</span><strong id="roomidentity"></strong><span id="sessionrole"></span></div><div id="hosts"></div><p id="searchnotice" class="searchnotice" role="status"></p><div id="joinoptions" hidden><button class="button" id="find">Find a session nearby</button></div><details id="manual"><summary id="manualtitle">Room settings</summary><div class="fields"><div id="addressfield"><label for="address">Host address</label><input id="address" placeholder="This Mac" disabled spellcheck="false"></div><div><label for="code">Room code</label><div class="codefield"><input id="code" spellcheck="false" autocomplete="off"><button class="textbutton" id="newcode" type="button">New code</button></div></div></div></details><div class="actions"><button class="button" id="disconnect" hidden>Leave session</button><button class="button primary" id="connect">Start session</button></div></div><div class="playback"><div class="monitorpanel"><div class="monitorheading"><span>CONNECTION SIGNAL</span><span id="monitorstate">OFFLINE</span></div><div class="pulsemonitor" aria-hidden="true"><div class="monitorflat"></div><svg class="offlinetrace" viewBox="0 0 640 76" preserveAspectRatio="none"><path d="M0 38h27l3-2 3 3 3-1h45l2 4 3-8 3 4h61l2-2 2 2h34l3 3 2-5 3 2h64l3-3 2 5 3-2h22M320 38h27l3-2 3 3 3-1h45l2 4 3-8 3 4h61l2-2 2 2h34l3 3 2-5 3 2h64l3-3 2 5 3-2h22"/></svg><svg viewBox="0 0 640 76" preserveAspectRatio="none"><g><path d="M0 38H30l5-4 5 4h12l4 6 5-30 6 44 6-20h15q5-10 10 0h62l5-4 5 4h12l4 6 5-30 6 44 6-20h15q5-10 10 0h81"/><path transform="translate(320 0)" d="M0 38H30l5-4 5 4h12l4 6 5-30 6 44 6-20h15q5-10 10 0h62l5-4 5 4h12l4 6 5-30 6 44 6-20h15q5-10 10 0h81"/></g></svg></div></div><p class="transport" id="transport">Ready when you are</p><div class="metrics" id="playbackmetrics" hidden><div class="metric"><strong id="bpm">—</strong><span>BPM</span></div><div class="metric"><strong id="position">—</strong><span>POSITION</span></div></div><div class="syncrow" id="syncrow" hidden><span id="syncstate" aria-live="polite">—</span><div class="offsetctl" role="group" aria-label="Move this laptop earlier or later"><button class="button compact" id="earlier" title="Play this laptop 5 ms earlier">Earlier</button><output id="offsetvalue">0 ms</output><button class="button compact" id="later" title="Play this laptop 5 ms later">Later</button></div></div><div class="links"><span class="link" id="fl"><i></i>FL Studio</span><span class="link" id="peer"><i></i><span id="peerlabel">Other laptops</span></span></div><ul id="members" class="members" aria-label="Laptops in this room" hidden></ul></div><p class="healthcopy" id="health" aria-live="polite"></p><div class="keycard"><div class="featurehead"><div><span class="eyebrow">AUDIO ANALYSIS</span><h2>Key detector</h2></div><button class="button compact" id="listen">Listen</button></div><div class="keyresult"><strong id="audiokey">—</strong><span id="keydetail"></span></div><div class="leveltrack" role="meter" id="audiolevel" aria-label="Audio input level" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0"><i></i></div><p id="keymessage" class="featurehint">Listen to FL Studio audio.</p><div id="partnerkeyrow" class="partnerresult" hidden><span>Others</span><strong id="partnerkey">—</strong><p id="partnerdetail"></p></div></div></section>
 <section class="page" id="timing" hidden><div class="card"><h2>Playback timing</h2><div class="settingsrow"><label for="wait">Start wait<small>Set on the Host</small></label><input id="wait" type="number" min="100" max="1000" step="50" value="400"><span>ms</span></div><div class="settingsrow"><label for="offset">Audio offset<small>This laptop’s output delay</small></label><input id="offset" type="number" min="-250" max="250" step="5" value="0"><span>ms</span></div><div class="settingsrow selectrow"><label for="startmode">Start mode<small>Set on the Host. Together holds Play for a shared count in. Instant starts right away and the others catch up.</small></label><select id="startmode"><option value="together">Together</option><option value="instant">Instant</option></select><span></span></div><p class="helper">Start wait gives every laptop time to prepare playback.<br>Apply changes while paused.</p><div class="actions"><button class="button primary" id="apply">Apply</button></div></div><div class="footer" id="saved" aria-live="polite"></div></section>

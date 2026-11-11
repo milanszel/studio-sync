@@ -1,4 +1,4 @@
-# Studio Sync 0.12.1
+# Studio Sync 0.13.0
 
 Links up to 8 FL Studio sessions on the same local network so play, pause, position, tempo and loop mode stay together. It also sends files, shows your partner's FL window, and estimates the key of what is playing.
 

@@ -6,6 +6,12 @@
 
 
 
+
+## 0.13.0 (app) · FL script unchanged (0.6.4)
+
+* New dark studio look that sits next to FL Studio: dark panels, orange accents, a larger room code, and a sync status panel that's easy to read while playing.
+* Partner View's pop out window matches.
+
 ## 0.12.1 (app) · FL script unchanged (0.6.4)
 
 * The app shows its version, with a Check for updates button, at the top of the window.
